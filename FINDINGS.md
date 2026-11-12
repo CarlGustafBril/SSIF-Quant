@@ -372,3 +372,35 @@ seen so far were not followed by the market moving toward the model.
   stays between 1.10 and 1.12. A thinner tail only moves the bias from the seconds where the 1h is
   further from 0.50 to the seconds where the 15m is.
 - **Not explained:** the remaining 4 to 10%. It is about the size of one tick plus the spread.
+
+### Strategy variants (2026-11-12 17:08 UTC, 83 events, code `ce2d76e`)
+
+`python variants.py` re-decides every recorded second under alternative rules from the same
+cached inputs. The baseline variant reproduces the frozen decisions on 100% of seconds. Nothing is
+tuned on P&L. Full table and definitions: `results/VARIANTS.md`; every run is appended to
+`results/variant_runs.csv`; earlier rule versions and their results: `results/HISTORY.md`.
+
+| Variant | Lasting signals (events) | Price move 30 s after a signal, all data | After the freeze | Trades held to expiry, all data |
+|---|---|---|---|---|
+| baseline (frozen) | 32 (8) | +0.6 c (se 1.2) vs 4.7 c edge | -6.4 c (se 2.5) | 5, -53 c (-87 to -20) |
+| brief_bars (no staleness) | 559 (64) | -0.0 c (se 0.4) vs 2.5 c | -0.9 c (se 0.6) | 29 resolved, -13 c (-30 to +5) |
+| limit_4 | 2 (2) | too few | none | 0 |
+| three_only | 15 (4) | -0.1 c (se 2.6) vs 5.8 c | -5.0 c (se 3.0) | 3 |
+| shared_stale | 102 (28) | +1.3 c (se 0.6) vs 3.7 c | -1.8 c (se 3.0) | 10, -15 c (-56 to +25) |
+| bias_corrected | 23 (10) | -3.7 c (se 1.5) vs 5.8 c | -6.9 c (se 2.1) | 6, +11 c (-31 to +53) |
+| bias_shared | 92 (28) | -0.3 c (se 0.7) vs 4.1 c | -3.8 c (se 2.2) | 12, +4 c (-25 to +33) |
+| exit_30s (sell after 30 s) | 32 (8) | as baseline | as baseline | 5, -4 c (-13 to +5) |
+
+What it shows:
+
+- **No variant's signals are followed by the price moving toward the model.** The clearest case is
+  `brief_bars`: 559 lasting signals in 64 events and a move of 0.0 cents (standard error 0.4)
+  against 2.5 cents predicted. After the freeze every variant's move is zero or negative.
+- **`shared_stale` is the only one with a positive move** (+1.3 c, about two standard errors, on all
+  data), but a third of the predicted edge, and it is negative after the freeze.
+- **The positive P&L of the bias variants is noise.** Their price move is negative, and the
+  intervals span tens of cents either side.
+- **Selling after 30 seconds loses about the spread** (-4 c per trade), as the price move predicts.
+- **The 30-second test measures convergence, not value at expiry.** A mispricing that persists
+  until settlement would not show in it. The only variant with enough resolved trades to say
+  anything about expiry, `brief_bars` (29), lost 13 cents per trade (-30 to +5).

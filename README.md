@@ -44,8 +44,9 @@ Run from this folder with the project's Python (`C:\polydata\venv\Scripts\python
 | `python votes.py 2026-11-12T05:00` | Second-by-second prices, votes and signals for one expiry (add `all` for every second) | seconds |
 | `python daily_check.py` | Data quality for yesterday: gaps, coverage, line error, outcomes reproduced | about 1 min |
 | `python fit_nu.py` | Refits the tail parameter from 90 days of Binance candles into `nu.json` | 1 min first time |
+| `python variants.py` | The frozen rules and alternatives side by side, on all data and on data after the freeze; every run logged to `results/` | about 5 min |
 | `python simulation_check.py` | Simulated markets with a known mispricing: is it found, and is nothing traded when prices are fair? | 2 min |
-| `python -m unittest discover tests` | 30 tests | 2 s |
+| `python -m unittest discover tests` | 36 tests | 2 s |
 | `python -m recorder.acceptance <start> <end>` | Recorder report for a UTC window | seconds per hour |
 
 Reports are saved in `C:\polydata\reports`. Plots are in `C:\polydata\analysis` as SVG files that
@@ -82,6 +83,7 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
 | `fit_nu.py`, `nu.json` | Tail fit and its result |
 | `votes.py` | The model: votes, error bars, outlier, range trade; builds the per-second table for an event |
 | `backtest.py` | Simulation and report |
+| `variants.py`, `results/` | Strategy variants and the logged history of every run (`variant_runs.csv`, `VARIANTS.md`, `HISTORY.md`) |
 | `simulation_check.py` | The same engine on simulated markets where the truth is known |
 | `svgplot.py` | Small plot writer (SVG), so no plotting library is needed |
 | `tests/` | Unit tests, including the brief's worked example |
