@@ -128,3 +128,35 @@ expiries without tick data (940 expiries, 63 trades, +1.0 c before fees, se 6.0)
 The rules of record are unchanged (v4). `same_feed` and `edge_8` are tracked alongside in
 `variants.py`. Results by variant: `variants_july.csv` (first delivery, each half),
 `variants_holdout.csv`, `variant_runs.csv` (our recording).
+
+## Today's settlement rule, from the public trade tape (2026-11-12, late evening)
+
+The 5m and 15m contracts changed from the spot price to the 60-second average between 2026-08-05
+and 2026-08-20 (rules text on Gamma). Our own recording under that rule is one day old. Polymarket
+publishes every trade (data-api v2), so best bid and ask can be rebuilt from the last trades on
+each side: `tape.py`.
+
+**The stand-in was checked on July first**, where book and trades both exist (1,056 expiries):
+
+| Check | Result |
+|---|---|
+| Rebuilt mid against the book's mid | median error 0, typical size 0 to 0.25 c, 95th percentile 2 to 3 c |
+| Frozen rules on book quotes | 164 trades, +8.5 c before fees (se 3.1) |
+| Frozen rules on trade-built quotes | 132 trades, +11.0 c (se 3.5); 124 on expiries the book version also traded |
+| The same 132 trades filled at the real book | +10.1 c, so the tape flatters fills by 0.9 c per trade |
+
+### Written down before fetching: the test on 2026-10-13 to 2026-11-11
+
+Nothing from this period has been fetched or looked at except our own recording from 11-11 20:53.
+
+- **Data:** every shared expiry of those UTC days (about 2,880), quotes rebuilt from the public
+  tape, official lines and outcomes, Binance 1-second candles, Chainlink taken as Binance minus the
+  gap at each 5-minute boundary (measured against Binance's own 60-second average, since the line
+  is now an average). Rules, 3 s persistence, 1 s fill delay, fee: exactly as in the code at this commit.
+- **Judged:** baseline (the rule of record), `same_feed`, `edge_8`. Nothing else.
+- **Figure that counts:** P&L per trade after fees, less the 0.9 c by which the tape flatters fills.
+- **Supported:** that figure is more than two standard errors above zero for the baseline.
+- **Not worth trading as it stands:** the upper end of its 95% interval is below +3 c.
+- **Otherwise:** undecided, and the size of the interval says how much more is needed.
+- **Check of the method under today's rule:** on the expiries our recorder also has, the tape
+  version's trades are compared with the recorder's. Reported whatever it shows.
