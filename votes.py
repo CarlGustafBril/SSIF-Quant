@@ -133,8 +133,12 @@ def find_outlier(votes, anchor, z_limit=Z_LIMIT):
 
 
 def model_prob(vote, v, nu):
-    """Model probability that a leg finishes Up, at width v per sqrt-second."""
-    return float(stats.t.sf(vote["x"] / (v * math.sqrt(vote["te"])), nu))
+    """Model probability that a leg finishes Up, at width v per sqrt-second.
+
+    A vote may carry a "scale" (variants.py, bias correction): its v is then in common units and
+    the leg's own width is v * scale. Without one the scale is 1, as in the frozen rules.
+    """
+    return float(stats.t.sf(vote["x"] / (v * vote.get("scale", 1.0) * math.sqrt(vote["te"])), nu))
 
 
 def range_edges(lo, hi, v, nu):
@@ -150,26 +154,32 @@ def range_edges(lo, hi, v, nu):
             "edge_buy": model - buy_cost, "edge_sell": sell_proceeds - model}
 
 
-def signal(legs, sd, nu, z_limit=Z_LIMIT):
+def signal(legs, sd, nu, z_limit=Z_LIMIT, adjust=None, pair_sigma=None, min_votes=2):
     """Everything for one second. legs: list of leg dicts (see leg_vote). sd: realised vol per sqrt-second.
 
     kind is "none", "outlier" (3+ legs, one named) or "pair" (2 legs disagree, none named).
     side is "buy" or "sell" (the range) with its executable edge, or None when there is no trade.
+
+    The keyword arguments are for the variants in variants.py; their defaults are the frozen rules.
+    adjust(votes) may rescale votes, pair_sigma(a, b) replaces the combined error bar of two votes,
+    and min_votes = 3 trades only when three contracts vote.
     """
     out = {"kind": "none", "n_votes": 0, "outlier": None, "z": {}, "consensus": np.nan, "anchor": np.nan,
            "lo": None, "hi": None, "model": np.nan, "market": np.nan, "side": None, "edge": np.nan, "votes": []}
     votes = [vote for vote in (leg_vote(leg, nu) for leg in legs) if vote]
+    if adjust:
+        votes = adjust(votes)
     votes.sort(key=lambda vote: vote["x"])
     out["votes"], out["n_votes"] = votes, len(votes)
     anchor = anchor_vote(sd, nu)
     if anchor:
         out["anchor"] = anchor["v"]
-    if len(votes) < 2:
+    if len(votes) < max(2, min_votes):
         return out
 
     if len(votes) == 2:
         a, b = votes
-        gap = abs(a["v"] - b["v"]) / math.hypot(a["sv"], b["sv"])
+        gap = abs(a["v"] - b["v"]) / (pair_sigma(a, b) if pair_sigma else math.hypot(a["sv"], b["sv"]))
         out["z"] = {a["name"]: gap, b["name"]: gap}
         if gap <= z_limit:
             return out
