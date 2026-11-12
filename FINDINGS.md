@@ -331,12 +331,13 @@ hourly event, and more when the market is quiet (one event at 09:00 UTC produced
 remaining false signals). A fixed per-contract correction fitted on the first part of the data did
 not carry over to the second part (the 1h offset went from 0.84 to 1.14), so none was added.
 
-### Two unclean reboots on 2026-11-12
+### Unclean reboots on 2026-11-12
 
-The PC rebooted without a clean shutdown twice (Windows Kernel-Power event 41): it came back at
-06:56:47 and 07:08:18 UTC. The recorder restarted by itself after each logon, at 06:57:09 and
-07:08:39. Data is missing for roughly 06:55 to 06:57 and 07:07 to 07:08 UTC, plus up to a minute of
-unflushed rows before each crash. The cause is not known; it is a risk of recording on a desktop PC.
+The PC rebooted without a clean shutdown three times (Windows Kernel-Power event 41): it came back
+at 06:56:47, 07:08:18 and 18:28:31 UTC. The recorder restarted by itself after each logon, at
+06:57:09, 07:08:39 and 18:29:04. Data is missing for roughly 06:55 to 06:57, 07:07 to 07:08 and
+18:27 to 18:29 UTC, plus up to a minute of unflushed rows before each crash. The cause is not known;
+it is a risk of recording on a desktop PC.
 
 ### Disagreement limit scan (2026-11-12 11:10 UTC, 59 events)
 
