@@ -99,3 +99,61 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
   a trade that mixes them is not a pure range.
 - The recorder runs on a desktop PC: after a reboot it resumes only once the user logs in.
 - The public Chainlink feed is deprecated by Polymarket and could be switched off.
+
+## Shared dataset
+
+A teammate shares a dataset over Tailscale (SFTP; host and user are in the env file below, not in this public repo). It is mirrored into
+`C:\polydata\shared` (`<POLYDATA_DIR>/shared`): `README.txt` and `DATA_INVENTORY.md` at the top,
+the data under `data/`. About 800 MB at first; `data/events/` (a few GB of Parquet) arrives later.
+
+- **Pull or refresh:** `C:\polydata\venv\Scripts\python scripts\pull_shared.py`. Files already here
+  with the remote's size are skipped, so re-run it whenever the remote has grown. It ends by
+  listing every file against the remote and describing each Parquet (columns, rows, first and last
+  timestamp). `--verify` compares without downloading, `--offline` describes the local copy only.
+- **Needs:** Tailscale connected with the teammate's machine visible (`tailscale ping <host>`),
+  and `SHARED_SFTP_HOST=...`, `SHARED_SFTP_USER=...` and `SHARED_SFTP_PASSWORD=...` in
+  `C:\polydata\shared_sftp.env` (not in the repo).
+- **Load:** `from recorder import load_shared`, then `load_shared.datasets()` for the names and
+  `load_shared.load("historical/contracts")`, with optional `columns=`, `start=`, `end=`.
+  Timestamps come back in UTC. For the tick extracts: `load_shared.events_index()` and
+  `load_shared.events("2026-07-11 18:30")`.
+- **Rule:** analysis only reads from `shared/`. Nothing derived is written there. Derived files go
+  to `C:\polydata\analysis` or `C:\polydata\reports` with the date in the name, for example
+  `analysis\events_summary_2026-11-12.parquet`.
+
+**Pulled 2026-11-12 (694 files, 1,344 MB, every size equal to the remote):**
+
+| Dataset name | Rows | Covers (UTC) | Content |
+|---|---|---|---|
+| `historical/contracts` | 11,289 | 2026-04-23 to 07-01 | Contract list, all five durations: line (`priceToBeat`), `finalPrice` |
+| `historical/trades` | 10,233,096 | 2026-04-22 to 05-07 | Trade tape, all durations (723 MB; pass `columns=` or `start=`/`end=`) |
+| `historical/trades_1h_june` | 744,469 | 2026-05-31 to 07-01 | Trade tape, 1h contracts |
+| `historical/prices_1m` | 172,043 | 2026-05-31 to 06-30 | One mid per token per minute, no bid/ask |
+| `historical/binance_1m` | 102,624 | 2026-04-23 to 07-03 | Binance BTCUSDT 1-minute candles |
+| `historical/binance_1s` | 2,620,978 | 2026-05-31 to 07-01 | Binance BTCUSDT 1-second closes |
+| `historical/chainlink_btc_usd` | 35,900 | 2026-04-23 to 05-07 | Chainlink on-chain rounds, about 34 s apart |
+| `orderbook_rest/orderbook_rest_dedup` | 2,553,573 | 2026-05-06 to 07-22 | Best bid/ask every 10 s, all durations; gap-free from 07-02 |
+| `events/<YYYYMMDD_HHMMSS>` | 45,216,455 in 681 files | 2026-07-11 18:15 to 07-18 20:45 | Tick extract per shared expiry (file name = expiry): book, trade and Binance rows for the 15 minutes before |
+| `events/index` | 7 so far | | One row per extracted expiry: legs, lines, outcomes, row counts |
+
+`data/events/` was still being written on the remote at the time of the pull (it should reach
+2026-07-22), so re-run the pull. `load("events")` is all event files as one table; with
+`start=`/`end=` it reads only the files whose window overlaps (six hours is about 1.3M rows, under
+a second). Any load of more than 500 MB on disk without `columns=` is refused (`max_bytes=None`
+overrides), which today means `historical/trades`; with five columns it is 266 MB in memory.
+`data/historical` is not one dataset, because its files have different columns.
+
+Things to know about the event extracts, checked on the pulled files:
+
+- `ts_ms` is the recording PC's receive time and `ex_ms` the exchange's time (Binance and trade
+  rows only; book rows have no exchange time). `ts_ms - ex_ms` is 12.8 s on median for both Binance
+  and Polymarket trades (min 9.1 s, 99th percentile 16.5 s, over 20M rows), far more than network
+  delay, so the recording PC's clock was about 13 s off. Use `ex_ms` where it exists. Book rows are
+  stamped on the offset clock: subtract about 12.8 s before lining them up with anything else.
+- Each file covers `ts_ms` from T-15 min to T+5 s. If the offset is right, the last ~8 s before
+  expiry in real time are not in the file.
+- `events/index` lists only the 7 events of a first test extraction (and `extract_log.txt` is from
+  that run); use the file names for the full list. Outcomes and settlement prices are null by
+  design (the tape has none); take them from `historical/contracts` where it overlaps (it ends
+  2026-07-01, so not for these July events) or from Binance. `shared\DATA_INVENTORY.md` has the full schemas and gap maps; the
+453 GB tick tape itself is not shared (`shared\data\TICK_TAPE_NOTE.txt`).

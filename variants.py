@@ -37,6 +37,7 @@ SUMMARY_MD = os.path.join(RESULTS_DIR, "VARIANTS.md")
 FREEZE_UTC = "2026-11-12T11:00"
 BIAS_MIN_SECONDS = 300              # seconds of earlier data a pair needs before its offset is used
 MOVE_HORIZON_S = 30
+FEED = {"5m": "chainlink", "15m": "chainlink", "1h": "binance"}     # the price each contract settles on
 
 DEFAULTS = {"z_limit": votes.Z_LIMIT, "staleness": "independent", "min_votes": 2, "bias": False,
             "exit_after_s": None}
@@ -89,8 +90,7 @@ def legs_for_row(r, names, staleness):
                 spot, stale = np.nan, 0.0
         legs.append({"name": n, "spot": spot, "line": r[f"line_{n}"], "bid": r[f"bid_{n}"], "ask": r[f"ask_{n}"],
                      "tick": r[f"tick_{n}"], "line_err": math.hypot(votes.LINE_ERR[n], stale), "tau": r["tau"],
-                     "w": votes.AVG_WINDOW_S[n], "stale": stale,
-                     "feed": "chainlink" if votes.AVG_WINDOW_S[n] else "binance"})
+                     "w": votes.AVG_WINDOW_S[n], "stale": stale, "feed": FEED[n]})
     return legs
 
 

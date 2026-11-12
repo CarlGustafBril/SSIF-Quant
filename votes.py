@@ -289,6 +289,44 @@ def binance_leg_reference(grid, market, feeds):
     return ref, age, line
 
 
+def decide_rows(table, names, nu_by_horizon, windows=AVG_WINDOW_S):
+    """The signal for every row of a table of inputs (quotes, spot, its age, line, tick, volatility per leg).
+
+    Shared by the recorder's event_table and by other data sources (july.py), so the rules are one
+    piece of code. windows: settlement averaging window per leg, in seconds.
+    """
+    rows = []
+    for r in table.itertuples(index=False):
+        nu = nu_for(r.tau, nu_by_horizon)
+        leg_inputs = []
+        for n in names:
+            spot, age_s = getattr(r, f"spot_{n}"), max(getattr(r, f"feed_age_{n}"), 0) / 1000
+            # our spot is age_s seconds old; in that time the price moves by about spot * sd * sqrt(age_s) dollars
+            stale = 0.0
+            if STALENESS_ERR:
+                sd_now = np.nanmax([r.sd, r.sd_fast]) if r.sd > 0 or r.sd_fast > 0 else np.nan
+                stale = spot * sd_now * math.sqrt(age_s)
+                if not stale >= 0:                  # no volatility figure: the error bar is unknown, so no vote
+                    spot = np.nan
+            leg_inputs.append({"name": n, "spot": spot, "line": getattr(r, f"line_{n}"),
+                               "bid": getattr(r, f"bid_{n}"), "ask": getattr(r, f"ask_{n}"), "tick": getattr(r, f"tick_{n}"),
+                               "line_err": math.hypot(LINE_ERR[n], stale), "tau": r.tau, "w": windows[n]})
+        s = signal(leg_inputs, r.sd, nu)
+        row = {"nu": nu, "kind": s["kind"], "n_votes": s["n_votes"], "outlier": s["outlier"], "consensus": s["consensus"],
+               "anchor": s["anchor"], "lo": s["lo"], "hi": s["hi"], "model": s["model"], "market": s["market"],
+               "side": s["side"], "edge": s["edge"],
+               "z_max": max((abs(z) for z in s["z"].values()), default=np.nan)}
+        for vote in s["votes"]:
+            row[f"x_{vote['name']}"], row[f"v_{vote['name']}"], row[f"sv_{vote['name']}"] = vote["x"], vote["v"], vote["sv"]
+        # the same second under stricter limits; only worth recomputing when the disagreement is that large
+        for limit in SCAN_LIMITS:
+            strict = signal(leg_inputs, r.sd, nu, limit) if row["z_max"] > limit else {"kind": "none"}
+            for col in SIGNAL_COLUMNS:
+                row[f"{col}{limit_suffix(limit)}"] = strict.get(col) if col not in ("edge", "model") else strict.get(col, np.nan)
+        rows.append(row)
+    return rows
+
+
 def event_table(legs, feeds, nu_by_horizon):
     """One row per second of an event: quotes, votes and the signal.
 
@@ -328,35 +366,7 @@ def event_table(legs, feeds, nu_by_horizon):
         table[f"line_{name}"] = line
         table[f"tick_{name}"] = tick
 
-    rows = []
-    for r in table.itertuples(index=False):
-        nu = nu_for(r.tau, nu_by_horizon)
-        leg_inputs = []
-        for n in names:
-            spot, age_s = getattr(r, f"spot_{n}"), max(getattr(r, f"feed_age_{n}"), 0) / 1000
-            # our spot is age_s seconds old; in that time the price moves by about spot * sd * sqrt(age_s) dollars
-            stale = 0.0
-            if STALENESS_ERR:
-                sd_now = np.nanmax([r.sd, r.sd_fast]) if r.sd > 0 or r.sd_fast > 0 else np.nan
-                stale = spot * sd_now * math.sqrt(age_s)
-                if not stale >= 0:                  # no volatility figure: the error bar is unknown, so no vote
-                    spot = np.nan
-            leg_inputs.append({"name": n, "spot": spot, "line": getattr(r, f"line_{n}"),
-                               "bid": getattr(r, f"bid_{n}"), "ask": getattr(r, f"ask_{n}"), "tick": getattr(r, f"tick_{n}"),
-                               "line_err": math.hypot(LINE_ERR[n], stale), "tau": r.tau, "w": AVG_WINDOW_S[n]})
-        s = signal(leg_inputs, r.sd, nu)
-        row = {"nu": nu, "kind": s["kind"], "n_votes": s["n_votes"], "outlier": s["outlier"], "consensus": s["consensus"],
-               "anchor": s["anchor"], "lo": s["lo"], "hi": s["hi"], "model": s["model"], "market": s["market"],
-               "side": s["side"], "edge": s["edge"],
-               "z_max": max((abs(z) for z in s["z"].values()), default=np.nan)}
-        for vote in s["votes"]:
-            row[f"x_{vote['name']}"], row[f"v_{vote['name']}"], row[f"sv_{vote['name']}"] = vote["x"], vote["v"], vote["sv"]
-        # the same second under stricter limits; only worth recomputing when the disagreement is that large
-        for limit in SCAN_LIMITS:
-            strict = signal(leg_inputs, r.sd, nu, limit) if row["z_max"] > limit else {"kind": "none"}
-            for col in SIGNAL_COLUMNS:
-                row[f"{col}{limit_suffix(limit)}"] = strict.get(col) if col not in ("edge", "model") else strict.get(col, np.nan)
-        rows.append(row)
+    rows = decide_rows(table, names, nu_by_horizon)
     result = pd.concat([table, pd.DataFrame(rows)], axis=1)
     for n in names:                                   # make sure the columns exist even if a leg never voted
         for col in (f"x_{n}", f"v_{n}", f"sv_{n}"):

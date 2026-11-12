@@ -4,5 +4,19 @@ venv/
 __pycache__/
 *.pyc
 data/
+shared/
+shared_sftp.env
 *.parquet
 *.log
+
+# local data and derived files (the recording lives in C:\polydata, outside the repo)
+polydata/
+reference/
+analysis/
+reports/
+books/
+*.csv.gz
+*.jsonl
+*.zip
+.claude/
+.pytest_cache/
