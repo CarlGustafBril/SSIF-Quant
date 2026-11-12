@@ -1,6 +1,8 @@
 """Is the signal valid? Tests that do not depend on thresholds or trade rules.
 
-    python evidence.py july          # the teammate's July tick recording (july.py)
+    python evidence.py summary       # the range trade on every dataset, pooled, and the sample still needed
+    python evidence.py july          # the teammate's July tick recording (july.py), 07-11 to 07-18
+    python evidence.py polls         # the July 3-second polls on the dates the tick recording does not cover
     python evidence.py november      # our own recording
     python evidence.py july --variants     # also the rule variants, on each half of the data
 
@@ -45,10 +47,32 @@ pd.set_option("display.max_rows", 500)
 
 
 # ============================================================================ data
+TIMING = {"july": (3, 1), "november": (3, 1), "polls": (6, 4)}     # seconds a signal must hold, then seconds to the fill
+
+
+class timing:
+    """Persistence and fill delay for a dataset. The polls arrive about every 3 s, so a signal there
+    must span two polls (6 s) and is filled at a later poll (4 s on). Set before any result was seen."""
+    def __init__(self, name):
+        self.new = TIMING[name]
+
+    def __enter__(self):
+        self.saved = backtest.PERSIST_S, backtest.DELAY_S
+        backtest.PERSIST_S, backtest.DELAY_S = self.new
+
+    def __exit__(self, *exc):
+        backtest.PERSIST_S, backtest.DELAY_S = self.saved
+
+
 def dataset(name):
-    """(signal table, outcomes, averaging windows) for 'july' or 'november'."""
+    """(signal table, outcomes, averaging windows) for 'july', 'polls' or 'november'."""
     if name == "july":
         return july.load().sort_values(["expiry", "ts"]).reset_index(drop=True), july.outcomes(), july.WINDOWS
+    if name == "polls":                       # only expiries the tick recording does not have: an independent sample
+        tick = july.load().expiry
+        polls = july.load_rest()
+        polls = polls[(polls.expiry < tick.min()) | (polls.expiry > tick.max())]
+        return polls.sort_values(["expiry", "ts"]).reset_index(drop=True), july.outcomes(), july.WINDOWS
     start = int(load("health", 0, now_ms(), columns=["recv_ts"]).recv_ts.min())
     signals, _ = backtest.load_days(start, now_ms() - 60_000)
     res = load("resolutions", start, now_ms()).drop_duplicates("slug", keep="last")
@@ -168,7 +192,7 @@ def leg_trades(gaps, a, b, min_gap, z_limit=votes.Z_LIMIT, persist=3, delay=1):
 
 # ============================================================================ variants on each half
 def _variant(args):
-    name, signals, outcomes, windows = args
+    name, signals, outcomes, windows, data = args
     spec = variants.VARIANTS[name]
     cfg = {**variants.DEFAULTS, **{k: v for k, v in spec.items() if k != "desc"}}
     saved = dict(votes.AVG_WINDOW_S)
@@ -178,16 +202,91 @@ def _variant(args):
     finally:
         votes.AVG_WINDOW_S.update(saved)
     rows = []
-    for period, part in (("all", table), *halves(table).items()):
-        rows.append({"variant": name, "period": period, **variants.evaluate(part, outcomes, cfg)})
+    with timing(data):
+        for period, part in (("all", table), *halves(table).items()):
+            rows.append({"data": data, "variant": name, "period": period, **variants.evaluate(part, outcomes, cfg)})
     return rows
 
 
-def variant_table(signals, outcomes, windows, names=None):
+def variant_table(signals, outcomes, windows, data, names=None):
     names = names or list(variants.VARIANTS)
     with ProcessPoolExecutor(min(len(names), 8)) as pool:
-        rows = [r for part in pool.map(_variant, [(n, signals, outcomes, windows) for n in names]) for r in part]
+        rows = [r for part in pool.map(_variant, [(n, signals, outcomes, windows, data) for n in names]) for r in part]
     return pd.DataFrame(rows).drop(columns=["trades_detail"])
+
+
+# ============================================================================ the range trade, pooled
+def interval(pnl_cents):
+    n = len(pnl_cents)
+    mean = pnl_cents.mean() if n else np.nan
+    se = pnl_cents.std(ddof=1) / np.sqrt(n) if n > 1 else np.nan
+    return n, mean, se
+
+
+def range_trades(name, threshold=backtest.DEFAULT_THRESHOLD):
+    """The frozen rules' trades on one dataset (one per expiry, held to expiry), with fees."""
+    signals, outcomes, _ = dataset(name)
+    with timing(name):
+        trades, _ = backtest.simulate(signals, outcomes, threshold)
+    return trades.dropna(subset=["pnl"]).assign(data=name), signals.expiry.nunique()
+
+
+DATASETS = {"july": "July tick recording, 07-11 to 07-18 (old settlement rule)",
+            "polls": "July 3-second polls, other dates 07-02 to 07-22 (old rule, coarser)",
+            "november": "Our recording, from 11-11 (current settlement rule)"}
+
+
+def summary():
+    backtest.section("The range trade under the frozen rules, on every dataset")
+    print("One trade per expiry at the first signal that lasts, 4.5 cents minimum edge, held to expiry.")
+    print(f"Cents per share. Fee: the exchange's taker fee, {backtest.FEE_RATE} x p x (1 - p) per share, on both legs.\n")
+    rows, pooled = [], []
+    for name, label in DATASETS.items():
+        trades, events = range_trades(name)
+        for column, kind in (("pnl", "before fees"), ("pnl_net", "after fees")):
+            n, mean, se = interval(trades[column] * 100)
+            rows.append({"data": label, "events": events, "trades": n, "P&L": kind, "hit": (trades[column] > 0).mean() if n else np.nan,
+                         "mean c": mean, "se": se, "95% low": mean - 1.96 * se, "95% high": mean + 1.96 * se})
+        pooled.append(trades)
+    print(pd.DataFrame(rows).round(2).to_string(index=False))
+
+    def pool(parts, title):
+        both = pd.concat(parts)
+        print(f"\n{title}: {len(both)} trades")
+        for column, kind in (("pnl", "before fees"), ("pnl_net", "after fees ")):
+            n, mean, se = interval(both[column] * 100)
+            print(f"  {kind}: {mean:+.1f} c per trade, se {se:.1f}, 95% interval {mean - 1.96 * se:+.1f} to {mean + 1.96 * se:+.1f}, "
+                  f"t = {mean / se:.1f}")
+        return both
+    july_all = pool(pooled[:2], "July pooled (two samples with no expiry in common)")
+    everything = pool(pooled, "All three pooled")
+    sd = everything.pnl_net.std(ddof=1) * 100
+    print(f"\nOne trade's P&L has a standard deviation of {sd:.0f} cents. To tell a true edge after fees from zero at")
+    print("two standard errors takes (2 x sd / edge)^2 trades:")
+    for edge in (3, 5, 8):
+        print(f"  true edge {edge} c: {int(np.ceil((2 * sd / edge) ** 2)):,} trades")
+    days = (pooled[2].expiry.max() - pooled[2].expiry.min()) / 86_400_000 if len(pooled[2]) > 1 else 0
+    print(f"The tick recording gave {len(pooled[0]) / 7.1:.0f} trades a day; ours has given {len(pooled[2])} in {days:.1f} days.")
+
+    backtest.section("Does a bigger edge at entry mean a bigger profit? (July pooled, 2 cents minimum edge)")
+    low = pd.concat([range_trades(n, 0.02)[0] for n in ("july", "polls")])
+    low["edge"] = pd.cut(low.edge_at_entry * 100, [2, 4.5, 8, 12, 100], right=False)
+    g = low.assign(c=low.pnl * 100, n_c=low.pnl_net * 100, e=low.edge_at_entry * 100).groupby("edge", observed=True)
+    print(pd.DataFrame({"trades": g.size(), "edge at entry c": g.e.mean(), "P&L c": g.c.mean(),
+                        "se": g.c.std() / np.sqrt(g.size()), "after fees c": g.n_c.mean()}).round(1).to_string())
+    d = low.assign(c=low.pnl * 100, e=low.edge_at_entry * 100)
+    slope_ = (d.e * d.c).sum() / (d.e ** 2).sum()
+    resid = d.c - slope_ * d.e
+    print(f"P&L per cent of edge (line through zero): {slope_:.2f}, se {np.sqrt((d.e ** 2 * resid ** 2).sum()) / (d.e ** 2).sum():.2f}. "
+          "1.0 would mean the model's edge is earned in full.")
+
+    backtest.section("By pair of contracts, side and dataset (July pooled, frozen rules)")
+    j = july_all.assign(pair=np.where(july_all.lo.isin(["1h"]) | july_all.hi.isin(["1h"]), "one leg is the 1h", "5m and 15m"),
+                        c=july_all.pnl * 100, n_c=july_all.pnl_net * 100)
+    for by in ("pair", "side", "kind", "data"):
+        g = j.groupby(by)
+        print(pd.DataFrame({"trades": g.size(), "hit": g.c.apply(lambda x: (x > 0).mean()), "P&L c": g.c.mean(),
+                            "se": g.c.std() / np.sqrt(g.size()), "after fees c": g.n_c.mean()}).round(2).to_string() + "\n")
 
 
 # ============================================================================ report
@@ -218,12 +317,13 @@ def report(name, with_variants):
             print(t.round(3).to_string(index=False))
 
     backtest.section("C. Trading one contract alone on the other's width (held to expiry, cents per share)")
-    print("Signal beyond the limit, gap after half the spread at least the threshold, held 3 s, filled 1 s later.")
+    print("Signal beyond the limit, gap after half the spread at least the threshold, held and filled as the range trade. Before fees.")
     rows = []
+    persist, delay = TIMING[name]
     for a, b in (("5m", "15m"), ("15m", "5m"), ("15m", "1h"), ("1h", "15m")):
         for min_gap in (0.02, 0.045, 0.08):
             for label, part in (("design", gaps[gaps.expiry < cut]), ("confirm", gaps[gaps.expiry >= cut])):
-                t = leg_trades(part, a, b, min_gap)
+                t = leg_trades(part, a, b, min_gap, persist=persist, delay=delay)
                 s = backtest.summarise(t)
                 rows.append({"trade": a, "width from": b, "min gap c": min_gap * 100, "half": label, "trades": s["trades"],
                              "hit": s["hit_rate"], "pnl c": s["pnl_cents"], "ci low": s["ci_low"], "ci high": s["ci_high"]})
@@ -231,7 +331,7 @@ def report(name, with_variants):
 
     if with_variants:
         backtest.section("D. Rule variants (range trade as specified), all data and each half")
-        v = variant_table(signals, outcomes, windows)
+        v = variant_table(signals, outcomes, windows, name)
         print(v.to_string(index=False))
         os.makedirs(variants.RESULTS_DIR, exist_ok=True)
         path = os.path.join(variants.RESULTS_DIR, f"variants_{name}.csv")
@@ -242,8 +342,8 @@ def report(name, with_variants):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    name = args[0] if args else "july"
-    if name not in ("july", "november"):
+    name = args[0] if args else "summary"
+    if name not in ("july", "polls", "november", "summary"):
         sys.exit(__doc__)
     import io
     buffer, stdout = io.StringIO(), sys.stdout
@@ -258,7 +358,11 @@ def main():
 
     sys.stdout = Tee()
     try:
-        report(name, "--variants" in sys.argv)
+        if name == "summary":
+            print(f"Evidence summary, run {fmt_ts(now_ms())} UTC, code {variants.git_version()}")
+            summary()
+        else:
+            report(name, "--variants" in sys.argv)
     finally:
         sys.stdout = stdout
     os.makedirs(REPORTS, exist_ok=True)

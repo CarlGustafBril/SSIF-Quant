@@ -14,9 +14,10 @@ Steps:
      quiet periods, calibration (normal vs t), monotonicity.
 
 Rules of the simulation: one position per expiry, fixed size of 1 share per leg, held to expiry.
+P&L is shown before fees and, as pnl_net, after the exchange's taker fee on both legs.
 A signal must hold for 3 seconds in a row (our spot price is about 2 seconds old, and a signal that
 vanishes once the feed catches up was never a mispricing). It is then executed at the quotes of the
-next second, and only if the edge is still at least the threshold there. No fees, no size limits.
+next second, and only if the edge is still at least the threshold there. No size limits.
 Lines for 5m and 15m come from our recorded feed. Official values are used only for outcomes.
 """
 import glob
@@ -44,6 +45,7 @@ MIN_TRAIN_TRADES = 30
 DELAY_S = 1                                          # seconds between seeing a signal and trading on it
 TARGET_SIGNAL_RATE = 0.01                            # the disagreement limit is chosen to signal on at most this share of seconds
 PERSIST_S = 3                                        # a signal must hold this many seconds in a row before we act
+FEE_RATE = 0.07                                      # taker fee per share = FEE_RATE * p * (1 - p), per fill (docs.polymarket.com/trading/fees)
 SAMPLE_EVERY_S = 10                                  # calibration sampling step
 LEGS = ("5m", "15m", "1h")
 Z_LIMIT = votes.Z_LIMIT
@@ -171,6 +173,8 @@ def simulate(signals, outcomes, threshold):
     buy = (entry.side == "buy").values
     entry["price"] = np.where(buy, lo_ask - hi_bid, lo_bid - hi_ask)        # paid for the range, or received
     entry["edge_at_entry"] = np.where(buy, entry.model - entry.price, entry.price - entry.model)
+    lo_fill, hi_fill = np.where(buy, lo_ask, lo_bid), np.where(buy, hi_bid, hi_ask)
+    entry["fee"] = FEE_RATE * (lo_fill * (1 - lo_fill) + hi_fill * (1 - hi_fill))   # both legs are taker fills
     seen = hits.expiry.nunique()
     entry = entry[entry.edge_at_entry >= threshold].sort_values("ts").drop_duplicates("expiry")
     buy = (entry.side == "buy").values
@@ -178,13 +182,14 @@ def simulate(signals, outcomes, threshold):
     up_hi = np.array([outcomes.get((e, l), np.nan) for e, l in zip(entry.expiry, entry.hi)])
     entry["payoff"] = up_lo - up_hi                                         # what the range pays
     entry["pnl"] = np.where(buy, entry.payoff - entry.price, entry.price - entry.payoff)
-    cols = ["expiry", "ts", "tau", "kind", "outlier", "lo", "hi", "side", "edge", "edge_at_entry", "price", "payoff", "pnl"]
+    entry["pnl_net"] = entry.pnl - entry.fee
+    cols = ["expiry", "ts", "tau", "kind", "outlier", "lo", "hi", "side", "edge", "edge_at_entry", "price", "payoff", "pnl", "fee", "pnl_net"]
     return entry[cols], seen - len(entry)
 
 
-def summarise(trades):
-    """Count, hit rate, mean P&L in cents and its 95% confidence interval."""
-    done = trades.dropna(subset=["pnl"])
+def summarise(trades, column="pnl"):
+    """Count, hit rate, mean P&L in cents and its 95% confidence interval. column="pnl_net" is after fees."""
+    done = trades.dropna(subset=[column]).assign(pnl=lambda d: d[column])
     n = len(done)
     if n == 0:
         return {"trades": 0, "hit_rate": np.nan, "pnl_cents": np.nan, "ci_low": np.nan, "ci_high": np.nan, "total_cents": 0.0}
@@ -242,6 +247,8 @@ def trading_report(signals, outcomes):
         interval = (f"95% interval [{s['ci_low']:+.2f}, {s['ci_high']:+.2f}]" if s["trades"] > 1
                     else "no interval from a single trade")
         print(f"  P&L per trade {s['pnl_cents']:+.2f} cents, {interval}, total {s['total_cents']:+.1f} cents")
+        net = summarise(trades, "pnl_net")
+        print(f"  after taker fees ({FEE_RATE} x p x (1 - p) per share and fill): {net['pnl_cents']:+.2f} cents per trade")
         done = trades.dropna(subset=["pnl"])
         print(f"  mean edge when seen {done.edge.mean() * 100:.2f} cents, one second later {done.edge_at_entry.mean() * 100:.2f} cents")
         by = done.assign(pnl_c=done.pnl * 100).groupby(["kind", "side"]).pnl_c.agg(["count", "mean", "sum"]).round(2)

@@ -76,3 +76,36 @@ staleness allowance at all).
 | 16:26 | Post-freeze test, 11:00 to 16:15 | 22 events, signals on 2.5% of seconds, 4 lasting signals in 2 events, price moved -6.4 c (se 2.5) against 11.5 c predicted, no trades; error-bar fit 0.94 |
 | 16:26 | Everything, 80 events | +1.2 c (se 1.2) vs 4.9 c, 29 signals in 8 events; the five trades so far all lost, all at full-hour expiries |
 | 17:07 | `variants.py` started | See `variant_runs.csv` and `VARIANTS.md` |
+
+## July data from the teammate's recording (2026-11-12, evening)
+
+The frozen rules (v4) were run unchanged on the teammate's July recording: `july.py`, `evidence.py`.
+July had a different settlement rule (5m and 15m settled on the Chainlink spot price at the window's
+ends, no 60-second average), and the dataset has no Chainlink feed, so Chainlink is taken as Binance
+minus the gap known at each 5-minute boundary. Fees are now included (`FEE_RATE` in `backtest.py`).
+
+| When (UTC) | Data | Events | Trades | P&L before fees | After fees | Price move after 30 s |
+|---|---|---|---|---|---|---|
+| 21:54 | July tick extracts, 07-11 18:30 to 07-18 20:45 | 681 | 106, hit rate 67% | +8.4 c (se 3.7) | +6.2 c | +1.7 c (se 0.4) vs 7.9 c edge |
+| 22:04 | July 3-second polls, other dates 07-02 to 07-22 | 1,315 | 90, hit rate 63% | +3.1 c (se 5.0) | +0.9 c | |
+| 22:04 | Both July samples | 1,996 | 196 | +6.0 c (se 3.0) | +3.8 c (se 3.0) | |
+| 22:04 | Our recording (current rule) | 103 | 6, one winner | -40.7 c (se 15.9) | -42.8 c | |
+
+### Written down before looking: the test on the remaining tick extracts
+
+At 22:10 UTC the share turned out to hold tick extracts from 07-18 21:00 onward that had not been
+pulled or looked at. They are the cleanest test available, so the expectations are fixed here first.
+Rules, thresholds, persistence (3 s), fill delay (1 s) and fee are exactly as in the code at this
+commit. Three rule sets are judged, and nothing else:
+
+1. **baseline** (frozen v4).
+2. **same_feed**: 5m and 15m only. Proposed today because 4 of the 6 losing November trades had the
+   hourly contract as one leg, and under the current rule the 15m implies a width 13% wider than the
+   1h (no such gap in July).
+3. **edge_8**: baseline with 8 cents minimum edge. Proposed today because the fee takes up to 3.5
+   cents and July P&L rose with the edge at entry.
+
+What would count as support: P&L per trade after fees above zero for the rule set, and a price move
+toward the model 30 s after a lasting signal. The sample will be about 380 expiries, so about 50
+trades and a standard error near 6 cents: it cannot settle the question alone. It will be reported
+whatever it shows, alone and pooled with the earlier July trades.

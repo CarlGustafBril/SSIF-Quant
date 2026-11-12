@@ -1,6 +1,6 @@
 """The same rules on the teammate's July 2026 tick recording (shared/data/events).
 
-    python july.py build          # per-second signal table for every shared expiry (about 10 min, parallel)
+    python july.py build          # per-second signal tables for every shared expiry (a few minutes, parallel)
     python july.py check          # how good the stand-ins are: clock, quotes, lines, error-bar fit
 
 One file per shared expiry holds the order-book updates of each contract for the 15 minutes
@@ -159,10 +159,10 @@ def _build_one(path):
         return f"{os.path.basename(path)}: {type(e).__name__}: {e}"
 
 
-def table_path():
+def table_path(kind="tick"):
     with open(os.path.abspath(__file__), "rb") as f:          # rebuilt when the rules or this file change
         tag = hashlib.md5(backtest.cache_tag().encode() + f.read()).hexdigest()[:8]
-    return os.path.join(OUT_DIR, f"july_tick_{tag}.parquet")
+    return os.path.join(OUT_DIR, f"july_{kind}_{tag}.parquet")
 
 
 def build(workers=6):
@@ -203,6 +203,98 @@ class votes_windows:
         votes.AVG_WINDOW_S.update(self.saved)
 
 
+# ============================================================================ the 3-second polls
+# The same PC also polled the best bid and ask of every contract about every 3 seconds, gap-free
+# from 2026-07-02 to 07-22: three times as many expiries as the tick extracts, but coarser.
+# Each poll row carries the Binance price fetched in the same cycle; against Binance's own
+# candles it is about 1.3 s older than the row's (corrected) time stamp.
+REST_FILE = os.path.join(SHARED, "orderbook_rest", "orderbook_rest_dedup.parquet")
+REST_BINANCE_AGE_MS = 2000
+REST_CHAINLINK_AGE_MS = 4000
+REST_MAX_QUOTE_AGE_MS = 12_000
+CLOCK_REF_MS, CLOCK_REF_OFFSET_MS, CLOCK_DRIFT = 1783794600000, 9225.0, 1.045 / 86400     # measured on the tape
+
+
+def rest_clock_offset_ms(ts_ms):
+    """The recording PC's clock error at a given (uncorrected) time: a straight line through the
+    offsets measured on the tick tape (9.2 s on 07-11 18:30, 1.045 s more per day), not below 0.5 s.
+    The polls' own Binance price agrees with this line to within a second on every day."""
+    return np.maximum(CLOCK_REF_OFFSET_MS + (np.asarray(ts_ms, dtype="float64") - CLOCK_REF_MS) * CLOCK_DRIFT, 500.0)
+
+
+def rest_polls():
+    """All 5m/15m/1h poll rows from 2026-07-02 on, with corrected time, grouped by expiry."""
+    ob = pd.read_parquet(REST_FILE, columns=["timestamp", "duration_label", "expiry", "bid", "ask", "btc_spot"])
+    ob = ob[ob.duration_label.isin(LENGTH_S)]
+    epoch = pd.Timestamp(0, tz="UTC")
+    raw = (pd.to_datetime(ob.timestamp, utc=True) - epoch) // pd.Timedelta(milliseconds=1)
+    ob = ob.assign(recv_ts=(raw - rest_clock_offset_ms(raw)).round().astype("int64"),
+                   expiry=(pd.to_datetime(ob.expiry, utc=True) - epoch) // pd.Timedelta(milliseconds=1))
+    ob = ob[ob.recv_ts >= int(pd.Timestamp("2026-07-02", tz="UTC").timestamp() * 1000)]
+    ob = ob[(ob.expiry - ob.recv_ts <= 900_000) & (ob.recv_ts < ob.expiry)].sort_values("recv_ts", kind="stable")
+    return {int(e): g.drop(columns=["timestamp", "expiry"]) for e, g in ob.groupby("expiry") if g.duration_label.nunique() >= 2}
+
+
+def rest_event_table(args):
+    """Like event_table, from poll rows. Quotes older than 12 s are dropped."""
+    expiry, polls = args
+    ref = reference()
+    nu_by_horizon = votes.load_nu()
+    names = [n for n in ("5m", "15m", "1h") if (polls.duration_label == n).any()]
+    opens = {n: expiry - LENGTH_S[n] * 1000 for n in names}
+    grid = np.arange(sorted(opens.values())[-2], expiry, 1000, dtype="int64")
+    candles = ref["candles"]
+    table = pd.DataFrame({"expiry": expiry, "ts": grid, "tau": (expiry - grid) / 1000})
+    table["sd"] = votes.realised_sd(grid, candles)
+    table["sd_fast"] = votes.realised_sd(grid, candles, returns=30, step_s=10)
+    spot = votes.asof(grid, polls, ["btc_spot"])
+    binance = np.where((spot.ts - spot.recv_ts).values <= REST_MAX_QUOTE_AGE_MS, spot.btc_spot.values, np.nan)
+    gap = votes.asof(grid, ref["gap"], ["gap"])
+    chainlink = np.where((gap.ts - gap.recv_ts).values <= 600_000, binance - gap.gap.values, np.nan)
+    for n in names:
+        quotes = votes.asof(grid, polls[polls.duration_label == n], ["bid", "ask"])
+        age = (quotes.ts - quotes.recv_ts).values
+        live = (grid >= opens[n]) & (age <= REST_MAX_QUOTE_AGE_MS)
+        if n == "1h":
+            leg_spot, feed_age, line = binance, REST_BINANCE_AGE_MS, candles.open.get(opens[n], np.nan)
+        else:
+            leg_spot, feed_age, line = chainlink, REST_CHAINLINK_AGE_MS, ref["chainlink_at"].get(opens[n] // 1000, np.nan)
+        table[f"bid_{n}"] = quotes.bid.where(live).values
+        table[f"ask_{n}"] = quotes.ask.where(live).values
+        table[f"quote_age_{n}"] = np.where(live, age, np.nan)
+        table[f"spot_{n}"] = leg_spot
+        table[f"feed_age_{n}"] = float(feed_age)
+        table[f"line_{n}"] = line
+        table[f"tick_{n}"] = TICK
+    decided = votes.decide_rows(table, names, nu_by_horizon, windows=WINDOWS)
+    result = pd.concat([table, pd.DataFrame(decided)], axis=1)
+    for n in names:
+        for col in (f"x_{n}", f"v_{n}", f"sv_{n}"):
+            if col not in result:
+                result[col] = np.nan
+    return result
+
+
+def build_rest(workers=6):
+    polls = rest_polls()
+    print(f"building {len(polls)} July events from the polls with {workers} processes ...", flush=True)
+    with ProcessPoolExecutor(workers) as pool:
+        tables = list(pool.map(rest_event_table, sorted(polls.items()), chunksize=8))
+    signals = pd.concat(tables, ignore_index=True)
+    for col in signals.columns:
+        if col.split("_z")[0] in ("kind", "outlier", "lo", "hi", "side"):
+            signals[col] = signals[col].astype("string")
+    for old in glob.glob(os.path.join(OUT_DIR, "july_rest_*.parquet")):
+        os.remove(old)
+    signals.to_parquet(table_path("rest"))
+    print(f"{signals.expiry.nunique()} events, {len(signals):,} seconds -> {table_path('rest')}")
+    return signals
+
+
+def load_rest():
+    return pd.read_parquet(table_path("rest")) if os.path.exists(table_path("rest")) else build_rest()
+
+
 # ============================================================================ checks
 def check():
     signals = load()
@@ -229,6 +321,7 @@ if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "build":
         build()
+        build_rest()
     elif command == "check":
         check()
     else:
