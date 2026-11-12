@@ -336,8 +336,10 @@ not carry over to the second part (the 1h offset went from 0.84 to 1.14), so non
 The PC rebooted without a clean shutdown three times (Windows Kernel-Power event 41): it came back
 at 06:56:47, 07:08:18 and 18:28:31 UTC. The recorder restarted by itself after each logon, at
 06:57:09, 07:08:39 and 18:29:04. Data is missing for roughly 06:55 to 06:57, 07:07 to 07:08 and
-18:27 to 18:29 UTC, plus up to a minute of unflushed rows before each crash. The cause is not known;
-it is a risk of recording on a desktop PC.
+18:27 to 18:29 UTC, plus up to a minute of unflushed rows before each crash. Windows logged two of
+them as blue screens: 0x1A (MEMORY_MANAGEMENT) at 07:08 and 0x139 (KERNEL_SECURITY_CHECK_FAILURE) at
+18:28, which point at RAM or a driver rather than at the recorder. A restart from the Start menu at
+18:41 UTC (clean, user-initiated) cost another gap from about 18:40 to 18:44 UTC.
 
 ### Disagreement limit scan (2026-11-12 11:10 UTC, 59 events)
 
