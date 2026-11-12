@@ -160,3 +160,45 @@ Nothing from this period has been fetched or looked at except our own recording 
 - **Otherwise:** undecided, and the size of the interval says how much more is needed.
 - **Check of the method under today's rule:** on the expiries our recorder also has, the tape
   version's trades are compared with the recorder's. Reported whatever it shows.
+
+### Outcome of the test on 2026-10-13 to 2026-11-11 (2,869 expiries)
+
+The method check found a fault before the result was used: the public tape stamps a trade about
+4 s after it matched (`python tape.py check`: against our recorded book the rebuilt 5m mid is off by
+3.9 c with the stamps as given and 1.5 c with them moved 4 s earlier). The run as registered used
+the stamps as given. Both runs are reported; the 4 s comes from the book comparison only.
+
+| Rule set | As registered (stamps as given) | Stamps moved 4 s earlier |
+|---|---|---|
+| baseline | 286 trades, +0.2 c before fees (se 2.5), -2.9 c after | 252 trades, +0.2 c (se 2.5), **-2.9 c after (95% interval -7.9 to +2.0)** |
+| same_feed | 119 trades, +5.0 c (se 3.7), +1.9 c after | 106 trades, +7.4 c (se 3.9), +4.2 c after (-3.6 to +11.9) |
+| edge_8 | 198 trades, +0.3 c (se 3.0), -2.9 c after | 180 trades, +0.2 c (se 3.0), -3.1 c after (-9.0 to +2.9) |
+
+"After" is after fees and the 0.9 c the tape flatters fills by.
+
+- **baseline: not worth trading as it stands**, by the rule written down beforehand (upper end of
+  the interval below +3 c), with either treatment of the stamps. Counting our recorder's six trades too, trades with the 1h as
+  one leg made -2.9 c before fees (151 trades) and 5m with 15m +2.3 c (107 trades).
+- **edge_8: the same verdict.**
+- **same_feed: undecided**, positive. Across the three samples it was judged on (two July tick
+  deliveries and this one, no expiry in common): 202 trades, +8.0 c before fees (se 2.8, t = 2.9),
+  +5.3 c after (95% interval -0.1 to +10.8, t = 1.9).
+- Check against our recorder on the 105 expiries both have: lines identical, rebuilt mids typically
+  within 0.5 c (95th percentile 4 to 5.5 c), the stand-in for Chainlink off by $6.7 (robust $3.6).
+  Signals on the same second often differ (305 in both, 667 recorder only, 170 tape only): a signal
+  sits at the edge of what a $5 error in the reference price allows, so two feeds with different
+  errors flag different seconds. Each is what a trader with that feed would have seen.
+
+### Written down before fetching: same_feed on 2026-08-20 to 2026-10-12
+
+The public tape goes back to the change of settlement rule. Those eight weeks have not been fetched.
+
+- **Data and method:** as above, stamps moved 4 s earlier, only contracts whose rules text names
+  the 60-second average. About 5,200 expiries; same_feed should trade about 190 times.
+- **Judged:** `same_feed` only. The baseline is reported for the record.
+- **Figure that counts:** P&L per trade after fees and after the 0.9 c.
+- **Confirmed:** positive on the new period, and more than two standard errors above zero on all
+  of today's rule together (this period plus 10-13 to 11-11).
+- **Rejected:** negative on the new period, or the upper end of the 95% interval for all of
+  today's rule below +3 c.
+- **Otherwise:** undecided.

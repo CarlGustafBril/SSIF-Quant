@@ -5,6 +5,8 @@
     python evidence.py holdout       # the second delivery of tick extracts (07-18 21:00 to 07-22), see HISTORY.md
     python evidence.py polls         # the July 3-second polls on the dates the tick recording does not cover
     python evidence.py november      # our own recording
+    python evidence.py now           # today's rule from the public trade tape (tape.py), 10-13 to 11-11
+    python evidence.py autumn        # the same for 08-20 to 10-12
     python evidence.py july --variants     # also the rule variants, on each half of the data
 
 The idea being tested: when two contracts that expire together imply different widths, one of them
@@ -34,6 +36,7 @@ from scipy import stats
 
 import backtest
 import july
+import tape
 import variants
 import votes
 from recorder import config
@@ -48,7 +51,8 @@ pd.set_option("display.max_rows", 500)
 
 
 # ============================================================================ data
-TIMING = {"july": (3, 1), "holdout": (3, 1), "november": (3, 1), "polls": (6, 4)}     # seconds a signal must hold, then seconds to the fill
+TIMING = {"july": (3, 1), "holdout": (3, 1), "november": (3, 1), "now": (3, 1), "autumn": (3, 1), "polls": (6, 4)}
+TAPE_FILL_OPTIMISM = 0.009     # dollars per trade by which trade-built quotes flatter fills (tape.py validate, July)     # seconds a signal must hold, then seconds to the fill
 
 
 class timing:
@@ -69,6 +73,8 @@ def dataset(name):
     """(signal table, outcomes, averaging windows) for 'july', 'polls' or 'november'."""
     if name == "july":
         return july.load().sort_values(["expiry", "ts"]).reset_index(drop=True), july.outcomes(), july.WINDOWS
+    if name in ("now", "autumn"):
+        return tape.load_now(name).sort_values(["expiry", "ts"]).reset_index(drop=True), tape.now_outcomes(), dict(votes.AVG_WINDOW_S)
     if name == "holdout":
         return july.load("holdout").sort_values(["expiry", "ts"]).reset_index(drop=True), july.outcomes(), july.WINDOWS
     if name == "polls":                       # only expiries no tick extract covers: an independent sample
@@ -208,7 +214,43 @@ def _variant(args):
     with timing(data):
         for period, part in (("all", table), *halves(table).items()):
             rows.append({"data": data, "variant": name, "period": period, **variants.evaluate(part, outcomes, cfg)})
+        trades, _ = backtest.simulate(table, outcomes, cfg["threshold"])      # kept, so that samples can be pooled later
+    trades.assign(pnl=trades.pnl.astype(float)).to_parquet(variant_trades_path(data, name))
     return rows
+
+
+def variant_trades_path(data, variant):
+    return os.path.join(config.DATA_DIR, "analysis", f"trades_{data}_{variant}.parquet")
+
+
+def variant_pooled(variant, title):
+    """One rule variant across the samples that share no expiry: July tick (both deliveries) and the
+    public tape under today's rule. Uses the trades saved by the last `--variants` run of each."""
+    backtest.section(title)
+    rows, parts = [], []
+    for data, label in (("july", "July tick, first delivery (old rule)"), ("holdout", "July tick, second delivery (old rule)"),
+                        ("now", "Public trade tape, 10-13 to 11-11 (today's rule)"),
+                        ("autumn", "Public trade tape, 08-20 to 10-12 (today's rule)")):
+        path = variant_trades_path(data, variant)
+        if not os.path.exists(path):
+            print(f"  no saved trades for {data}: run  python evidence.py {data} --variants")
+            continue
+        t = pd.read_parquet(path).dropna(subset=["pnl"]).assign(data=data)
+        if data in ("now", "autumn"):
+            t["pnl_net"] -= TAPE_FILL_OPTIMISM
+        parts.append(t)
+        for column, kind in (("pnl", "before fees"), ("pnl_net", "after fees")):
+            n, mean, se = interval(t[column] * 100)
+            rows.append({"data": label, "trades": n, "P&L": kind, "hit": (t[column] > 0).mean(), "mean c": mean, "se": se,
+                         "95% low": mean - 1.96 * se, "95% high": mean + 1.96 * se})
+    if not parts:
+        return
+    print(pd.DataFrame(rows).round(2).to_string(index=False))
+    both = pd.concat(parts)
+    print(f"\nPooled: {len(both)} trades")
+    for column, kind in (("pnl", "before fees"), ("pnl_net", "after fees ")):
+        n, mean, se = interval(both[column] * 100)
+        print(f"  {kind}: {mean:+.1f} c per trade, se {se:.1f}, 95% interval {mean - 1.96 * se:+.1f} to {mean + 1.96 * se:+.1f}, t = {mean / se:.1f}")
 
 
 def variant_table(signals, outcomes, windows, data, names=None):
@@ -231,13 +273,18 @@ def range_trades(name, threshold=backtest.DEFAULT_THRESHOLD):
     signals, outcomes, _ = dataset(name)
     with timing(name):
         trades, _ = backtest.simulate(signals, outcomes, threshold)
-    return trades.dropna(subset=["pnl"]).assign(data=name), signals.expiry.nunique()
+    trades = trades.dropna(subset=["pnl"]).assign(data=name)
+    if name in ("now", "autumn"):              # "after fees" on the tape also takes off what the tape flatters fills by
+        trades["pnl_net"] -= TAPE_FILL_OPTIMISM
+    return trades, signals.expiry.nunique()
 
 
 DATASETS = {"july": "July tick recording, 07-11 to 07-18 (old settlement rule)",
             "holdout": "July tick recording, 07-18 to 07-22, expectations fixed first",
             "polls": "July 3-second polls, expiries without tick data (old rule, coarser)",
-            "november": "Our recording, from 11-11 (current settlement rule)"}
+            "autumn": "Public trade tape, 08-20 to 10-12 (today's rule), test fixed first",
+            "now": "Public trade tape, 10-13 to 11-11 (today's rule), test fixed first",
+            "november": "Our recording, from 11-11 (today's rule)"}
 
 
 def size_at_fill(trades):
@@ -274,36 +321,38 @@ def summary():
     backtest.section("The range trade under the frozen rules, on every dataset")
     print("One trade per expiry at the first signal that lasts, 4.5 cents minimum edge, held to expiry.")
     print(f"Cents per share. Fee: the exchange's taker fee, {backtest.FEE_RATE} x p x (1 - p) per share, on both legs.\n")
-    rows, pooled = [], []
+    rows, parts = [], {}
     for name, label in DATASETS.items():
         trades, events = range_trades(name)
         for column, kind in (("pnl", "before fees"), ("pnl_net", "after fees")):
             n, mean, se = interval(trades[column] * 100)
             rows.append({"data": label, "events": events, "trades": n, "P&L": kind, "hit": (trades[column] > 0).mean() if n else np.nan,
                          "mean c": mean, "se": se, "95% low": mean - 1.96 * se, "95% high": mean + 1.96 * se})
-        pooled.append(trades)
+        parts[name] = trades
     print(pd.DataFrame(rows).round(2).to_string(index=False))
+    print(f"On the trade tape, 'after fees' also takes off {TAPE_FILL_OPTIMISM * 100:.1f} c, by which trade-built quotes flatter fills.")
 
-    def pool(parts, title):
-        both = pd.concat(parts)
+    def pool(names, title):
+        both = pd.concat([parts[n] for n in names]).drop_duplicates("expiry", keep="last")     # our recording wins over the tape
         print(f"\n{title}: {len(both)} trades")
         for column, kind in (("pnl", "before fees"), ("pnl_net", "after fees ")):
             n, mean, se = interval(both[column] * 100)
             print(f"  {kind}: {mean:+.1f} c per trade, se {se:.1f}, 95% interval {mean - 1.96 * se:+.1f} to {mean + 1.96 * se:+.1f}, "
                   f"t = {mean / se:.1f}")
         return both
-    pool(pooled[:2], "July tick recording, both deliveries")
-    july_all = pool(pooled[:-1], "July pooled (samples with no expiry in common)")
-    everything = pool(pooled, "All pooled")
+    tick = pool(["july", "holdout"], "July tick recording, both deliveries (old rule)")
+    july_all = pool(["july", "holdout", "polls"], "All of July (old rule)")
+    today = pool(["autumn", "now", "november"], "Today's rule: public tape and our recording")
+    everything = pool(list(DATASETS), "Everything")
     sd = everything.pnl_net.std(ddof=1) * 100
     print(f"\nOne trade's P&L has a standard deviation of {sd:.0f} cents. To tell a true edge after fees from zero at")
     print("two standard errors takes (2 x sd / edge)^2 trades:")
     for edge in (3, 5, 8):
         print(f"  true edge {edge} c: {int(np.ceil((2 * sd / edge) ** 2)):,} trades")
-    days = (pooled[-1].expiry.max() - pooled[-1].expiry.min()) / 86_400_000 if len(pooled[-1]) > 1 else 0
-    print(f"The tick recording gave {len(pooled[0]) / 7.1:.0f} trades a day; ours has given {len(pooled[-1])} in {days:.1f} days.")
+    print(f"Trades per day: July tick recording {len(parts['july']) / 7.1:.0f}, public tape under today's rule "
+          f"{(len(parts['now']) + len(parts['autumn'])) / 84:.0f}.")
 
-    capacity(pd.concat(pooled[:2]))
+    capacity(tick)
 
     backtest.section("Does a bigger edge at entry mean a bigger profit? (July pooled, 2 cents minimum edge)")
     low = pd.concat([range_trades(n, 0.02)[0] for n in ("july", "holdout", "polls")])
@@ -317,7 +366,14 @@ def summary():
     print(f"P&L per cent of edge (line through zero): {slope_:.2f}, se {np.sqrt((d.e ** 2 * resid ** 2).sum()) / (d.e ** 2).sum():.2f}. "
           "1.0 would mean the model's edge is earned in full.")
 
-    backtest.section("By pair of contracts, side and dataset (July pooled, frozen rules)")
+    for title, j_all in (("July, old rule", july_all), ("today's rule", today)):
+        by_group(title, j_all)
+    variant_pooled("same_feed", "The candidate rule: 5m and 15m only (same_feed), on the three samples it was judged on")
+    variant_pooled("baseline", "For comparison, the rule of record on the same three samples")
+
+
+def by_group(title, july_all):
+    backtest.section(f"By pair of contracts, side and dataset ({title}, frozen rules)")
     j = july_all.assign(pair=np.where(july_all.lo.isin(["1h"]) | july_all.hi.isin(["1h"]), "one leg is the 1h", "5m and 15m"),
                         c=july_all.pnl * 100, n_c=july_all.pnl_net * 100)
     for by in ("pair", "side", "kind", "data"):
@@ -380,7 +436,7 @@ def report(name, with_variants):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     name = args[0] if args else "summary"
-    if name not in ("july", "holdout", "polls", "november", "summary"):
+    if name not in ("july", "holdout", "polls", "november", "now", "autumn", "summary"):
         sys.exit(__doc__)
     import io
     buffer, stdout = io.StringIO(), sys.stdout

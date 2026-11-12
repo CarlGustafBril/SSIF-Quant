@@ -2,7 +2,8 @@
 
     python tape.py validate            # July: quotes rebuilt from trades against the recorded book
     python tape.py fetch 2026-10-13 2026-11-11     # lines, outcomes, Binance candles and trades for those UTC days
-    python tape.py build               # per-second signal tables for everything fetched
+    python tape.py build now           # per-second signal table for a fetched period ("now" or "autumn", see PERIODS)
+    python tape.py check               # today's rule: the tape version against our own recorder, same expiries
 
 Why: our own recording under today's settlement rule (60-second average, since mid-August 2026)
 is a day old. The exchange publishes every trade of every contract (data-api.polymarket.com/v2),
@@ -48,25 +49,29 @@ LENGTH_S = july.LENGTH_S
 BINANCE_AGE_MS = 1000
 CHAINLINK_AGE_MS = 3000
 TRADE_QUOTE_EXTRA_AGE_MS = 1000        # a trade-built quote is at least a second old; widen the error bar for it
+API_LAG_S = 4                          # the public tape stamps a trade about 4 s after it matched (see lag_scan)
 
 
 # ============================================================================ quotes from trades
-def up_trades(trades):
+def up_trades(trades, lag_s=0):
     """Trades of one contract as (recv_ts in ms, Up price, lift). lift: the taker bought Up exposure.
 
     trades: columns ts (whole seconds), price, side ("BUY"/"SELL"), outcome_index (0 Up, 1 Down).
+    lag_s: how long after the match the time stamp was made. The July files carry the exchange's
+    own match time (0). The public tape's stamp is about 4 s late: against our recorded book the
+    rebuilt quotes fit best when moved 4 s earlier (mean error 1.5 c instead of 3.7 c on the 5m).
     """
     up = trades.outcome_index.values == 0
     buy = trades.side.str.upper().values == "BUY"
-    out = pd.DataFrame({"recv_ts": (trades.ts.values.astype("int64") + 1) * 1000,
+    out = pd.DataFrame({"recv_ts": (trades.ts.values.astype("int64") + 1 - lag_s) * 1000,
                         "px": np.where(up, trades.price.values, 1 - trades.price.values),
                         "lift": up == buy})
     return out.sort_values("recv_ts", kind="stable")
 
 
-def quotes_from_trades(trades, grid):
+def quotes_from_trades(trades, grid, lag_s=0):
     """Best bid and ask of the Up token at each grid time, rebuilt from the trades. NaN when no trade is fresh."""
-    t = up_trades(trades)
+    t = up_trades(trades, lag_s)
     sides = {}
     for name, part in (("ask", t[t.lift]), ("bid", t[~t.lift])):
         got = votes.asof(grid, part, ["px"]) if len(part) else None
@@ -115,7 +120,7 @@ def averaged_reference(grid, spot, close_ts, w, ref):
     return out
 
 
-def event_table(expiry, legs, ref, windows, nu_by_horizon=None):
+def event_table(expiry, legs, ref, windows, nu_by_horizon=None, lag_s=0):
     """One row per second, in the layout of votes.event_table, with quotes rebuilt from trades.
 
     legs: {name: trades of that contract}. ref: candles, gap, line(name, open_ts in ms).
@@ -133,7 +138,7 @@ def event_table(expiry, legs, ref, windows, nu_by_horizon=None):
     w_chain = max(windows["5m"], windows["15m"])
     binance, chainlink = chainlink_stand_in(grid, ref, w_chain)
     for n in names:
-        bid, ask, age = quotes_from_trades(legs[n], grid)
+        bid, ask, age = quotes_from_trades(legs[n], grid, lag_s)
         live = grid >= opens[n]
         if n == "1h":
             spot, feed_age, line = binance, BINANCE_AGE_MS, candles.open.get(opens[n], np.nan)
@@ -346,15 +351,34 @@ def fetch_trades_one(args):
     return slug, out
 
 
-def fetch(first_day, last_day, threads=4):
+def ensure_candles(first_day, last_day):
+    """Binance 1-second candles for those days: the public daily files, or, for a day Binance has not
+    published yet (the current day), the candles our own recorder received."""
+    import requests
+
     import scripts.fetch_july_reference as public
+    from recorder.reader import load as load_recorded
+    path = os.path.join(REFERENCE, "binance_1s.parquet")
+    for day in pd.date_range(first_day, last_day).strftime("%Y-%m-%d"):
+        public.FIRST_DAY = public.LAST_DAY = day
+        try:
+            public.fetch_binance()
+        except requests.HTTPError:
+            start = int(pd.Timestamp(day, tz="UTC").timestamp() * 1000)
+            own = load_recorded("binance", start, start + 86_400_000 + 600_000, columns=["open_ts", "open", "close", "closed"])
+            own = own[own.closed & (own.open_ts >= start) & (own.open_ts < start + 86_400_000)].drop_duplicates("open_ts")
+            have = pd.read_parquet(path)
+            have = have[(have.open_ts < start) | (have.open_ts >= start + 86_400_000)]      # today's part is replaced each time
+            pd.concat([have, own[["open_ts", "open", "close"]]]).sort_values("open_ts").to_parquet(path)
+            print(f"  binance {day}: not published yet, {len(own)} candles from our own recorder", flush=True)
+
+
+def fetch(first_day, last_day, threads=4):
     os.makedirs(TAPE_DIR, exist_ok=True)
-    public.FIRST_DAY = (pd.Timestamp(first_day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    public.LAST_DAY = last_day
-    public.fetch_binance()
+    ensure_candles((pd.Timestamp(first_day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"), last_day)
     main, extra = contracts_for(first_day, last_day)
     lines = fetch_lines(pd.concat([main, extra]), os.path.join(TAPE_DIR, "lines.parquet"))
-    lines = lines[lines.slug.isin(main.slug) & lines.condition_id.notna()]
+    lines = lines[lines.slug.isin(main.slug) & lines.condition_id.notna() & lines.up.isin([0.0, 1.0])]      # resolved contracts only
     for day, part in lines.groupby(pd.to_datetime(lines.close_ts - 1, unit="s").dt.strftime("%Y-%m-%d")):
         path = os.path.join(TAPE_DIR, f"trades_{day}.parquet")
         if os.path.exists(path):
@@ -405,30 +429,112 @@ def _now_day(path):
     ref = now_reference()
     trades = pd.read_parquet(path)
     lines = ref["lines"].set_index("slug")
-    trades = trades.join(lines[["length", "close_ts"]], on="slug")
+    lines = lines[lines.settles_on.isin(["chainlink_twap", "binance"])]          # today's rule only
+    trades = trades.join(lines[["length", "close_ts"]], on="slug", how="inner")
     tables = []
     for close, part in trades.groupby("close_ts"):
         legs = {n: t for n, t in part.groupby("length")}
-        tables.append(event_table(int(close) * 1000, legs, ref, votes.AVG_WINDOW_S))
+        tables.append(event_table(int(close) * 1000, legs, ref, votes.AVG_WINDOW_S, lag_s=API_LAG_S))
     return pd.concat([t for t in tables if t is not None], ignore_index=True) if tables else None
 
 
-def now_path():
-    return os.path.join(OUT_DIR, "tape_now.parquet")
+PERIODS = {"now": ("2026-10-13", "2026-11-11"),          # the first test under today's rule
+           "autumn": ("2026-08-20", "2026-10-12")}       # the second, back to the change of rule
 
 
-def build(workers=6):
-    files = sorted(glob.glob(os.path.join(TAPE_DIR, "trades_*.parquet")))
-    print(f"building {len(files)} days from the public trade tape ...", flush=True)
+def now_path(period="now"):
+    return os.path.join(OUT_DIR, f"tape_{period}.parquet")
+
+
+def build(period="now", workers=6):
+    first, last = PERIODS[period]
+    files = [f for f in sorted(glob.glob(os.path.join(TAPE_DIR, "trades_*.parquet"))) if first <= os.path.basename(f)[7:17] <= last]
+    print(f"building {len(files)} days ({period}) from the public trade tape ...", flush=True)
     with ProcessPoolExecutor(workers) as pool:
         tables = list(pool.map(_now_day, files))
-    signals = finish(tables, now_path())
-    print(f"{signals.expiry.nunique()} events, {len(signals):,} seconds -> {now_path()}")
+    signals = finish(tables, now_path(period))
+    print(f"{signals.expiry.nunique()} events, {len(signals):,} seconds -> {now_path(period)}")
     return signals
 
 
-def load_now():
-    return pd.read_parquet(now_path()) if os.path.exists(now_path()) else build()
+def load_now(period="now"):
+    return pd.read_parquet(now_path(period)) if os.path.exists(now_path(period)) else build(period)
+
+
+def lag_scan():
+    """Mean error of the rebuilt mid against our recorded book, for time shifts of the public tape's stamps."""
+    import evidence
+    own, _, _ = evidence.dataset("november")
+    lines = now_reference()["lines"].set_index("slug")
+    days = sorted(set(pd.to_datetime(own.expiry, unit="ms").dt.strftime("%Y-%m-%d")))
+    trades = pd.concat([pd.read_parquet(f) for d in days for f in glob.glob(os.path.join(TAPE_DIR, f"*_{d}.parquet"))])
+    trades = trades.join(lines[["length", "close_ts"]], on="slug")
+    rows = {}
+    for lag in range(0, 9):
+        errors = {n: [] for n in ("5m", "15m", "1h")}
+        for close, part in trades.groupby("close_ts"):
+            o = own[own.expiry == close * 1000]
+            for n, t in part.groupby("length"):
+                if len(o) and f"bid_{n}" in o:
+                    bid, ask, _ = quotes_from_trades(t, o.ts.values, lag)
+                    e = ((bid + ask) - (o[f"bid_{n}"].values + o[f"ask_{n}"].values)) / 2 * 100
+                    errors[n].append(np.abs(e[np.isfinite(e)]))
+        rows[lag] = {n: np.mean(np.concatenate(v)) if v else np.nan for n, v in errors.items()}
+    print("Mean error of the rebuilt mid in cents, by the lag assumed for the tape's time stamps (seconds):")
+    print(pd.DataFrame(rows).T.round(2).to_string())
+
+
+def check():
+    """Under today's rule: the tape version against our own recorder on the expiries both have.
+
+    Needs the public trades of the recorder's days: trades_<day>.parquet inside the test period,
+    check_<day>.parquet for days after it (fetch the day, then rename the file so that the test
+    period stays as it was fixed)."""
+    import backtest
+    import evidence
+    own, outcomes, _ = evidence.dataset("november")
+    _NOW.clear()
+    days = sorted(set(pd.to_datetime(own.expiry, unit="ms").dt.strftime("%Y-%m-%d")))
+    files = [f for d in days for f in glob.glob(os.path.join(TAPE_DIR, f"*_{d}.parquet"))]
+    tape = pd.concat([_now_day(f) for f in files], ignore_index=True)
+    tape = tape[tape.expiry.isin(own.expiry.unique())].sort_values(["expiry", "ts"]).reset_index(drop=True)
+    own = own[own.expiry.isin(tape.expiry.unique())].sort_values(["expiry", "ts"]).reset_index(drop=True)
+    print(f"Expiries in both: {own.expiry.nunique()} ({backtest.fmt_ts(own.expiry.min())} to {backtest.fmt_ts(own.expiry.max())} UTC)\n")
+    both = own.merge(tape, on=["expiry", "ts"], suffixes=("", "_tape"))
+    rows = []
+    for n in ("5m", "15m", "1h"):
+        d = both[[f"bid_{n}", f"ask_{n}", f"bid_{n}_tape", f"ask_{n}_tape", f"spot_{n}", f"spot_{n}_tape", f"line_{n}", f"line_{n}_tape",
+                  f"v_{n}", f"v_{n}_tape"]]
+        q = d[[f"bid_{n}", f"ask_{n}", f"bid_{n}_tape", f"ask_{n}_tape"]].dropna()
+        mid_err = ((q[f"bid_{n}_tape"] + q[f"ask_{n}_tape"]) - (q[f"bid_{n}"] + q[f"ask_{n}"])) / 2 * 100
+        spot_err = (d[f"spot_{n}_tape"] - d[f"spot_{n}"]).dropna()
+        line_err = (d[f"line_{n}_tape"] - d[f"line_{n}"]).dropna()
+        v = d[[f"v_{n}", f"v_{n}_tape"]].dropna()
+        rows.append({"contract": n, "seconds": len(q), "mid error, typical c": mid_err.abs().median(), "95th pct c": mid_err.abs().quantile(0.95),
+                     "spot error sd $": spot_err.std(), "spot error robust $": 1.4826 * (spot_err - spot_err.median()).abs().median(),
+                     "line error max $": line_err.abs().max(),
+                     "vote ratio median": float(np.exp(np.log(v[f"v_{n}_tape"] / v[f"v_{n}"]).median())) if len(v) else np.nan})
+    print("1. Inputs, tape version against the recorder:")
+    print(pd.DataFrame(rows).round(3).to_string(index=False))
+    for label, t in (("recorder", own), ("tape", tape)):
+        voted = (t.n_votes >= 2).sum()
+        print(f"  {label}: seconds with 2+ votes {voted:,}, signal on {(t.kind != 'none').sum() / max(voted, 1):.1%}")
+    agree = both[(both.n_votes >= 2) & (both.n_votes_tape >= 2)]
+    print(f"  same second, both voting: signal in both {((agree.kind != 'none') & (agree.kind_tape != 'none')).sum():,}, "
+          f"recorder only {((agree.kind != 'none') & (agree.kind_tape == 'none')).sum():,}, "
+          f"tape only {((agree.kind == 'none') & (agree.kind_tape != 'none')).sum():,}")
+    print("\n2. Trades under the frozen rules (cents per trade, before fees):")
+    t_own, _ = backtest.simulate(own, outcomes, backtest.DEFAULT_THRESHOLD)
+    t_tape, _ = backtest.simulate(tape, outcomes, backtest.DEFAULT_THRESHOLD)
+    for label, t in (("recorder", t_own), ("tape", t_tape)):
+        pnl = t.pnl.dropna() * 100
+        print(f"  {label:<9} {len(pnl)} trades, won {(pnl > 0).mean():.0%}, {pnl.mean():+.1f} c")
+    same = t_tape.merge(t_own, on="expiry", suffixes=("_tape", "_own"))
+    ok = (same.side_tape == same.side_own) & (same.lo_tape == same.lo_own) & (same.hi_tape == same.hi_own)
+    print(f"  expiries traded by both: {len(same)}, same legs and side in {ok.sum()}")
+    show = pd.concat([t_own.assign(source="recorder"), t_tape.assign(source="tape")]).sort_values(["expiry", "source"])
+    print(show.assign(expiry=show.expiry.map(backtest.fmt_ts))[["expiry", "source", "tau", "kind", "lo", "hi", "side", "edge_at_entry", "price", "pnl"]]
+          .round(3).to_string(index=False))
 
 
 if __name__ == "__main__":
@@ -438,6 +544,9 @@ if __name__ == "__main__":
     elif command == "fetch" and len(sys.argv) == 4:
         fetch(sys.argv[2], sys.argv[3])
     elif command == "build":
-        build()
+        build(sys.argv[2] if len(sys.argv) > 2 else "now")
+    elif command == "check":
+        lag_scan()
+        check()
     else:
         sys.exit(__doc__)
