@@ -1,0 +1,26 @@
+# systemd unit for the recorder on a Linux VM. See recorder/README.md, "Moving to a Linux VM".
+[Unit]
+Description=Polymarket BTC up/down market data recorder (read-only)
+After=network-online.target chrony.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polyrecorder
+Group=polyrecorder
+WorkingDirectory=/opt/polyrecorder
+Environment=POLYDATA_DIR=/var/lib/polyrecorder
+ExecStart=/opt/polyrecorder/venv/bin/python -m recorder
+Restart=always
+RestartSec=5
+# SIGINT lets the recorder write its last buffered minute before exiting
+KillSignal=SIGINT
+TimeoutStopSec=30
+# the recorder needs nothing but its own data folder
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/polyrecorder
+
+[Install]
+WantedBy=multi-user.target
