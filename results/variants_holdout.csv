@@ -1,0 +1,4 @@
+data,variant,events,signal_rate,lasting_signals,lasting_events,move30_c,move30_se_c,edge_seen_c,trades,hit_rate,pnl_c_per_trade,pnl_ci_low_c,pnl_ci_high_c,net_c_per_trade,net_ci_low_c,net_ci_high_c,run_utc,code_version
+holdout,baseline,375,0.093,306,78,2.06,0.53,7.19,58,0.603,8.64,-2.7,19.98,6.44,-4.87,17.75,2026-11-12 22:17:41,876b184+uncommitted
+holdout,same_feed,375,0.0331,116,45,1.98,1.15,9.17,32,0.688,10.38,-2.86,23.61,8.36,-4.8,21.53,2026-11-12 22:17:41,876b184+uncommitted
+holdout,edge_8,375,0.093,306,78,2.06,0.53,7.19,38,0.632,13.43,-2.14,29.0,11.03,-4.49,26.55,2026-11-12 22:17:41,876b184+uncommitted

@@ -407,3 +407,160 @@ What it shows:
 - **The 30-second test measures convergence, not value at expiry.** A mispricing that persists
   until settlement would not show in it. The only variant with enough resolved trades to say
   anything about expiry, `brief_bars` (29), lost 13 cents per trade (-30 to +5).
+
+## Phase 3: the July recording (2026-11-12, 21:00 to 22:30 UTC)
+
+A teammate shared a recording of the same contracts from July 2026 (`README.md`, "Shared dataset").
+It has ten to twenty times the shared expiries of our own recording, so the frozen rules were run on
+it unchanged. Code: `july.py` (builds the per-second tables), `evidence.py` (the tests),
+`scripts/fetch_july_reference.py` (public reference data). Full outputs are in
+`C:\polydata\reports\evidence_*.txt`.
+
+### What the July data is, and how it differs from ours
+
+| | Our recording (November) | July tick extracts | July polls |
+|---|---|---|---|
+| Shared expiries | 104 so far | 1,056 (07-11 18:30 to 07-22 19:15) | 1,996 (07-02 to 07-22), 940 of them without tick data |
+| Quotes | every book update | every book update | best bid and ask about every 3 s |
+| Settlement of 5m and 15m | Chainlink 60-second average | **Chainlink spot price at the window's ends** | same as tick |
+| Chainlink feed | recorded | **not recorded** | not recorded |
+| Lines and outcomes | recorded, and official | official (Polymarket's Gamma API) | official |
+| Clock | within 0.6 s | 9 to 21 s fast, measured per file to about 10 ms and removed | same clock, known to about 1 s |
+
+- **Settlement rule.** The rules text of every July 5m and 15m contract names the Chainlink BTC/USD
+  stream, with no average. So for July the averaging window is 0 for all three contracts. This is a
+  different product from today's in one respect that matters to the model.
+- **No Chainlink price.** The official line of each 5m contract is the Chainlink price at a
+  5-minute boundary, so the gap between Binance and Chainlink is known exactly every 5 minutes (July
+  mean $53, sd $11). Between boundaries Chainlink is taken as Binance minus the last known gap.
+  Checked on our November data, where both exist: the gap wobbles by about $5 (robust $3.4) between
+  two times 5 minutes apart and by the same amount 15 minutes apart, so it does not drift. $5 is what
+  our live Chainlink price is off by through being 2 s old, so the stand-in is given an age of 3 s
+  in the error bars (2 s for this, 1 s for Binance's own delay). In July the gap between consecutive
+  boundaries also changed by $5.0 (robust $3.8).
+- **Is the stand-in good enough?** The check is the same as for our own data: across 160,000
+  seconds with two votes, contracts disagree by 1.01 error bars in the typical second (5m vs 15m
+  0.85, 15m vs 1h 1.26). The error bars are the right size on average.
+- **Official data is consistent.** For all 7,852 July contracts with a published line and final
+  price (of 8,485), the outcome equals "final price at or above the line". For the 1h contracts, line and final price equal the Binance candle's open
+  and close to the cent.
+- **Fees.** Polymarket charges takers 0.07 x p x (1 - p) per share on these contracts (1.75 cents
+  at a price of 0.50), confirmed in its fee documentation and in the contracts' own settings. The
+  range trade has two legs; the fee averaged 2.2 cents per trade. All P&L is now reported before and
+  after it (`FEE_RATE` in `backtest.py`). The earlier sections of this file are before fees.
+
+### Result: the range trade under the frozen rules
+
+| Data | Expiries | Trades | Won | Before fees | After fees | Price move 30 s after a signal |
+|---|---|---|---|---|---|---|
+| Tick, first delivery (07-11 to 07-18) | 681 | 106 | 67% | +8.4 c (se 3.7) | +6.2 c | +1.7 c (se 0.4), edge seen 7.9 c |
+| Tick, second delivery (07-18 to 07-22) | 375 | 58 | 60% | +8.6 c (se 5.7) | +6.4 c | +2.1 c (se 0.5), edge seen 7.2 c |
+| Both tick deliveries | 1,056 | 164 | 65% | +8.5 c (se 3.1), t = 2.7 | +6.3 c (+0.2 to +12.3), t = 2.0 | |
+| Polls, expiries without tick data | 940 | 63 | 65% | +1.0 c (se 6.0) | -1.1 c | |
+| All of July | 1,996 | 227 | | +6.4 c (se 2.8), t = 2.3 | +4.2 c (-1.2 to +9.7), t = 1.5 | |
+| Our recording, today's rule | 104 | 6 | 17% | -40.7 c (se 15.9) | -42.8 c | +0.8 c (se 1.0) |
+| Everything | 2,100 | 233 | | +5.2 c (se 2.8), t = 1.9 | +3.0 c (-2.4 to +8.5), t = 1.1 | |
+
+- **The second delivery is a clean test.** It was on the teammate's machine but not pulled when the
+  first results came in. What would count as support was written into `results/HISTORY.md` and
+  committed (`876b184`) before it was downloaded. One caveat: the poll data for those four days had
+  already been run (27 trades, +7.9 c, se 9), so the period was not wholly unseen, only its tick data.
+- **It repeated the first delivery:** +8.6 c against +8.4 c before fees, and the same price move
+  after a signal. Alone it is not significant (58 trades), as expected in advance.
+- **Bigger edge, bigger profit.** With trades from 2 cents of edge up, across all of July:
+
+  | Edge at entry | Trades | P&L before fees | After fees |
+  |---|---|---|---|
+  | 2 to 4.5 c | 65 | +3.4 c (se 4.5) | +1.7 c |
+  | 4.5 to 8 c | 94 | +3.6 c (se 4.0) | +1.6 c |
+  | 8 to 12 c | 58 | +7.8 c (se 5.9) | +5.6 c |
+  | 12 c and more | 61 | +12.6 c (se 5.4) | +10.4 c |
+
+  A line through zero gives 0.61 cents of profit per cent of edge (se 0.24): about 60% of the edge
+  the model sees is earned.
+- **Both kinds of pair contribute:** 5m with 15m +6.5 c (126 trades), a pair with the 1h +6.3 c
+  (101 trades). Buying and selling the range both earn (+7.9 c on 82, +5.6 c on 145).
+- **The polls give about zero.** They are a weaker instrument (a quote up to 3 s old against a
+  price whose timing is known to about a second), and a signal there must span two polls. Whether
+  the lower figure is the coarser data or a weaker period (07-02 to 07-11) cannot be told apart.
+  It is counted in the pooled figures either way.
+- **Why the profit must be held to expiry.** Selling back after 30 seconds lost 1.0 c before fees
+  and 5.5 c after (se 0.9). The price moves toward the model by about a fifth of the edge and no
+  more. So the profit is in the final payout, which is why one trade's P&L has a standard deviation
+  of 43 cents and why hundreds of trades are needed.
+
+### Result: does the other contract's width carry information? (no thresholds, no trade rules)
+
+For a contract priced p, let m be the model's probability at the other contract's width. If the
+disagreement means anything, the contract should finish Up more often than p says when m is above
+p. `evidence.py` regresses (outcome - p) on (m - p), clustered by expiry. A slope of 1 means the
+other contract was right, 0 means the contract's own price was.
+
+| Contract | Width from | Seconds | Slope on signal seconds, July first delivery | Design half / confirm half |
+|---|---|---|---|---|
+| 5m | 15m | 5,982 in 296 expiries | 0.36 (se 0.20) | 0.15 / 0.43 |
+| 15m | 5m | 5,982 in 296 expiries | 0.41 (se 0.19) | 0.41 / 0.42 |
+| 15m | 1h | 8,250 in 125 expiries | -0.17 (se 0.34) | -0.05 / -0.22 |
+| 1h | 15m | 8,250 in 125 expiries | 0.35 (se 0.26) | 0.54 / 0.25 |
+
+- For the 5m and 15m pair each contract's width explains about 40% of the other's gap, in both
+  halves. That is what two noisy prices of the same thing look like: the truth is in between, and
+  the range trade (which needs both views to agree on the direction) picks that up.
+- Over all seconds, not only signal seconds, the four slopes are 0.05 to 0.15 and within two
+  standard errors of zero. The information is in the large disagreements.
+- On our November data the same two slopes are 0.86 (se 0.77) and 0.66 (se 0.38): the same sign,
+  far too noisy to count.
+- Prices close only 4 to 13% of the gap within 60 seconds.
+
+### Why November may differ, and the two candidate rules
+
+- Under today's rule the 15m implies a width 13% wider than the 1h (in 18 of 21 hourly events). In
+  July the ratio was 0.99. Something about the 60-second average is priced differently from our
+  adjustment (time left minus 40 s), or the two feeds are compared less cleanly than in July.
+- Four of the six November trades had the 1h as one leg, and all four lost.
+- Two rule sets were therefore defined before the second delivery was pulled, and are tracked from
+  now on next to the baseline:
+
+  | Rule set | What changes | July first delivery (after fees) | July second delivery (after fees) | November |
+  |---|---|---|---|---|
+  | baseline | nothing | 106 trades, +6.2 c | 58 trades, +6.4 c | 6 trades, -42.8 c |
+  | `same_feed` | 5m and 15m only | 64 trades, +5.8 c | 32 trades, +8.4 c | 1 trade, +20 c |
+  | `edge_8` | at least 8 c of edge | 73 trades, +9.5 c | 38 trades, +11.0 c | 3 trades, -33 c |
+
+  On July the three cannot be told apart (standard errors of 4 to 8 cents). The baseline stays the
+  rule of record. Which of the three is right for today's market is a question only our own
+  recording can answer.
+- All other variants were also positive on July's first delivery when held to expiry
+  (`results/variants_july.csv`); the brief's original error bars gave 325 trades at +4.1 c before
+  fees and +1.7 c after.
+
+### Size
+
+At the moment of each July tick trade the smaller of the two legs had a median of 53 shares at the
+best price (middle half 23 to 141). Taking at most 200 shares per trade, the 164 trades made about
+$1,100 after fees in 11 days; at most 50 shares, about $400. That is before our own orders move the
+price. As it stands this is a small strategy.
+
+### What this does and does not show
+
+- **Shown, on July data:** contracts that expire together disagree by more than noise often enough
+  to trade, the disagreement predicts the outcome, and the frozen rules earned about 6 cents per
+  trade after fees on tick-level data, twice.
+- **Not shown:** that any of this holds under today's settlement rule. Six trades cannot show it
+  either way, and five of them lost.
+- **Honest strength of the evidence:** two standard errors after fees on the best data, 1.5 with
+  the polls, 1.1 with November. Several rule sets were looked at on the first delivery; only the
+  baseline, `same_feed` and `edge_8` were judged on the second.
+- **The test from here:** keep recording. At about 6 trades a day, 290 trades (enough to tell a
+  5-cent edge after fees from zero) take about 7 weeks. Proposed decision points, to be agreed by
+  the team: stop if after 100 trades the baseline's P&L after fees is more than two standard errors
+  below +6 c (the July figure); call it confirmed only if after 290 trades it is two standard
+  errors above zero. `python evidence.py summary` prints the running figures.
+
+### Open questions
+
+1. Can the teammate's tape after 07-22 (fragments to 08-14) be extracted as well? It would add up
+   to about 130 more shared expiries under the old rule.
+2. When exactly did the settlement rule change from the spot price to the 60-second average? It
+   matters for how much weight July can carry.
+3. Is the proposed stop/confirm rule above acceptable to the team?

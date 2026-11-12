@@ -79,8 +79,15 @@ def outcomes():
     return {(int(c) * 1000, l): float(u) for c, l, u in zip(lines.close_ts, lines.length, lines.up)}
 
 
-def event_files():
-    return sorted(p for p in glob.glob(os.path.join(SHARED, "events", "20*.parquet")))
+SEEN_UNTIL = 1784407500        # 2026-07-18 20:45 UTC: the last expiry of the first delivery
+
+
+def event_files(part="tick"):
+    """Tick extracts. "tick": the first delivery, which the rules were looked at on.
+    "holdout": the second delivery (07-18 21:00 on), pulled only after the expectations for it
+    were written down in results/HISTORY.md."""
+    files = sorted(p for p in glob.glob(os.path.join(SHARED, "events", "20*.parquet")))
+    return [p for p in files if (expiry_of(p) > SEEN_UNTIL) == (part == "holdout")]
 
 
 def expiry_of(path):
@@ -165,9 +172,9 @@ def table_path(kind="tick"):
     return os.path.join(OUT_DIR, f"july_{kind}_{tag}.parquet")
 
 
-def build(workers=6):
-    files = event_files()
-    print(f"building {len(files)} July events with {workers} processes ...", flush=True)
+def build(workers=6, part="tick"):
+    files = event_files(part)
+    print(f"building {len(files)} July events ({part}) with {workers} processes ...", flush=True)
     with ProcessPoolExecutor(workers) as pool:
         results = list(pool.map(_build_one, files, chunksize=4))
     failed = [r for r in results if isinstance(r, str)]
@@ -179,18 +186,17 @@ def build(workers=6):
         if col.split("_z")[0] in ("kind", "outlier", "lo", "hi", "side"):
             signals[col] = signals[col].astype("string")
     os.makedirs(OUT_DIR, exist_ok=True)
-    for old in glob.glob(os.path.join(OUT_DIR, "july_tick_*.parquet")):
+    for old in glob.glob(os.path.join(OUT_DIR, f"july_{part}_*.parquet")):
         os.remove(old)
-    signals.to_parquet(table_path())
+    signals.to_parquet(table_path(part))
     print(f"{signals.expiry.nunique()} events, {len(signals):,} seconds, {len(failed)} files failed, "
-          f"{len(files) - len(failed) - len(tables)} skipped -> {table_path()}")
+          f"{len(files) - len(failed) - len(tables)} skipped -> {table_path(part)}")
     return signals
 
 
-def load():
-    """The July signal table, built if this version of the rules has none yet."""
-    with votes_windows():
-        return pd.read_parquet(table_path()) if os.path.exists(table_path()) else build()
+def load(part="tick"):
+    """A July signal table ("tick" or "holdout"), built if this version of the rules has none yet."""
+    return pd.read_parquet(table_path(part)) if os.path.exists(table_path(part)) else build(part=part)
 
 
 class votes_windows:
@@ -321,6 +327,7 @@ if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "build":
         build()
+        build(part="holdout")
         build_rest()
     elif command == "check":
         check()

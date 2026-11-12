@@ -7,24 +7,45 @@ markets and tests whether the prices disagree with each other by enough to trade
 
 Everything here is read-only market data. Nothing places orders, and nothing touches `trader.py`.
 
-## Status (2026-11-12)
+## Status (2026-11-12, 22:30 UTC)
 
-- **Recorder:** recording since 2026-11-11 20:53 UTC (one 30-second restart on 2026-11-12) as the
-  Windows task `PolyRecorder`, writing to
+**In one line:** the signal made money on a teammate's July recording, and did so again on a part
+of it we had not looked at, but July had a different settlement rule; under today's rule we have
+six trades, five of them losers. It is a research result with a defined test, not yet a strategy to fund.
+
+| Data | Shared expiries | Trades | Won | P&L per trade before fees | After fees |
+|---|---|---|---|---|---|
+| July tick recording, first delivery (07-11 to 07-18) | 681 | 106 | 67% | +8.4 c (se 3.7) | +6.2 c |
+| July tick recording, second delivery (07-18 to 07-22), expectations written down first | 375 | 58 | 60% | +8.6 c (se 5.7) | +6.4 c |
+| **Both tick deliveries** | 1,056 | 164 | 65% | **+8.5 c (se 3.1)** | **+6.3 c (95% interval +0.2 to +12.3)** |
+| July 3-second polls, expiries with no tick data (coarser) | 940 | 63 | 65% | +1.0 c (se 6.0) | -1.1 c |
+| Our own recording since 11-11 (today's settlement rule) | 104 | 6 | 17% | -40.7 c (se 15.9) | -42.8 c |
+| Everything | 2,100 | 233 | | +5.2 c (se 2.8) | +3.0 c (95% interval -2.4 to +8.5) |
+
+All rows use the rules frozen on 2026-11-12 11:00 UTC, unchanged: one range trade per expiry, 4.5
+cents minimum edge, held to expiry. "se" is the standard error; a result is usually called
+established when it is more than two standard errors from zero.
+
+- **For the signal:** on tick-level July data the profit is 2.7 standard errors from zero before
+  fees and 2.0 after. The second delivery repeated the first almost exactly. Trades with a larger
+  edge at entry earned more (0.61 cents per cent of edge, se 0.24). After a lasting signal the
+  price moved 1.7 to 2.1 cents toward the model within 30 seconds (se 0.4 to 0.5).
+- **Against it:** (1) In July the 5m and 15m contracts settled on a spot price; since then they
+  settle on a 60-second average, and our six trades under that rule lost. Six trades prove nothing
+  either way, but there is no evidence yet for the market as it is today. (2) The fee, 0.07 x p x
+  (1 - p) per share and fill, takes 2.2 of the 8.5 cents. (3) On the coarser poll data the result is
+  about zero. (4) Size is small: a median of 53 shares was on offer at the fill, so the July result
+  is about $400 to $1,600 in 11 days. (5) Prices do not converge quickly (selling back after 30
+  seconds loses), so the profit comes only from holding to expiry, which is why it is so noisy.
+- **What is needed:** about 290 trades under today's rule to tell a 5-cent edge after fees from
+  zero. Our recorder gives roughly 6 a day, so about 7 weeks; fewer if the edge is larger.
+- **Recorder:** running since 2026-11-11 20:53 UTC as the Windows task `PolyRecorder`, writing to
   `C:\polydata`. Our recorded line matched the official one to the cent on every window checked.
-- **Analysis engine:** built and tested; the brief's acceptance numbers reproduce. On simulated
-  markets it trades nothing when prices are fair, and when one contract is quoted 6 or 10 cents off
-  it names that contract and earns about the edge it predicted (`simulation_check.py`).
-- **Measurement on real data: works.** Contracts that expire together disagree by 0.96 error bars
-  in the typical second, where 1.0 means the error bars are exactly the right size.
-- **Strategy result on real data: not shown yet.** After a lasting signal the price moves +2.4 cents
-  toward the model in 30 seconds (standard error 1.2, predicted 3.8), but on only 25 signals and on
-  data the last fix was designed on. Held to expiry there are 3 trades, all losers; about 280 are
-  needed for +/- 4.5 cents.
-- **The rules are frozen as of 2026-11-12 11:00 UTC.** Data after that is the honest test:
-  `python backtest.py 2026-11-12T11:00 2026-11-30`.
+- **Rules:** still the ones frozen on 2026-11-12 11:00 UTC. Two alternatives are tracked alongside
+  (`same_feed`, `edge_8` in `variants.py`); neither replaces the baseline until our own data says so.
 
-Details, including everything that differs from the original brief, are in `FINDINGS.md`.
+Details, including everything that differs from the original brief, are in `FINDINGS.md`; every
+rule version and result in `results/HISTORY.md`.
 
 ## The idea in five lines
 
@@ -46,7 +67,11 @@ Run from this folder with the project's Python (`C:\polydata\venv\Scripts\python
 | `python fit_nu.py` | Refits the tail parameter from 90 days of Binance candles into `nu.json` | 1 min first time |
 | `python variants.py` | The frozen rules and alternatives side by side, on all data and on data after the freeze; every run logged to `results/` | about 5 min |
 | `python simulation_check.py` | Simulated markets with a known mispricing: is it found, and is nothing traded when prices are fair? | 2 min |
-| `python -m unittest discover tests` | 36 tests | 2 s |
+| `python evidence.py summary` | The table above: the frozen rules on every dataset, pooled, with fees, size and the sample still needed | 1 min |
+| `python evidence.py july` (or `holdout`, `polls`, `november`) | Threshold-free tests on one dataset: does the other contract's width predict the outcome or the next price move? Add `--variants` for every rule variant | 1 to 10 min |
+| `python july.py build` | Rebuilds the July signal tables from the shared dataset (needs the two steps under "Shared dataset" first) | 3 min |
+| `python scripts/fetch_july_reference.py` | Official July lines and outcomes (Polymarket) and Binance 1-second candles, into `C:\polydata\reference` | 5 min |
+| `python -m unittest discover tests` | 43 tests | 2 s |
 | `python -m recorder.acceptance <start> <end>` | Recorder report for a UTC window | seconds per hour |
 
 Reports are saved in `C:\polydata\reports`. Plots are in `C:\polydata\analysis` as SVG files that
@@ -85,13 +110,19 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
 | `backtest.py` | Simulation and report |
 | `variants.py`, `results/` | Strategy variants and the logged history of every run (`variant_runs.csv`, `VARIANTS.md`, `HISTORY.md`) |
 | `simulation_check.py` | The same engine on simulated markets where the truth is known |
+| `july.py` | The same rules on the teammate's July recording (tick extracts and 3-second polls) |
+| `evidence.py` | The signal tests and the pooled summary across datasets |
+| `scripts/` | `pull_shared.py` (mirror the shared dataset), `fetch_july_reference.py` (public reference data for July) |
 | `svgplot.py` | Small plot writer (SVG), so no plotting library is needed |
 | `tests/` | Unit tests, including the brief's worked example |
 | `FINDINGS.md` | What was verified, what differs from the brief, open questions |
 
 ## Known limits
 
-- No fees and no size limits are modelled.
+- The taker fee is included (`pnl_net`); size limits and our own price impact are not. Every
+  trade is one share per leg at the best price.
+- The July test stands in for the missing Chainlink feed with Binance minus the gap known at each
+  5-minute boundary, and July's settlement rule differs from today's (`july.py`, `FINDINGS.md`).
 - Our Chainlink price arrives about 1.5 seconds after its timestamp, and the market reacts to
   Binance sooner than that. The error bars and the 3-second rule exist to keep that lag from
   looking like mispricing.
@@ -121,7 +152,7 @@ the data under `data/`. About 800 MB at first; `data/events/` (a few GB of Parqu
   to `C:\polydata\analysis` or `C:\polydata\reports` with the date in the name, for example
   `analysis\events_summary_2026-11-12.parquet`.
 
-**Pulled 2026-11-12 (694 files, 1,344 MB, every size equal to the remote):**
+**Pulled 2026-11-12 in two deliveries (first 694 files, 1,344 MB; then 375 more tick extracts at 22:10 UTC):**
 
 | Dataset name | Rows | Covers (UTC) | Content |
 |---|---|---|---|
@@ -133,11 +164,11 @@ the data under `data/`. About 800 MB at first; `data/events/` (a few GB of Parqu
 | `historical/binance_1s` | 2,620,978 | 2026-05-31 to 07-01 | Binance BTCUSDT 1-second closes |
 | `historical/chainlink_btc_usd` | 35,900 | 2026-04-23 to 05-07 | Chainlink on-chain rounds, about 34 s apart |
 | `orderbook_rest/orderbook_rest_dedup` | 2,553,573 | 2026-05-06 to 07-22 | Best bid/ask every 10 s, all durations; gap-free from 07-02 |
-| `events/<YYYYMMDD_HHMMSS>` | 45,216,455 in 681 files | 2026-07-11 18:15 to 07-18 20:45 | Tick extract per shared expiry (file name = expiry): book, trade and Binance rows for the 15 minutes before |
+| `events/<YYYYMMDD_HHMMSS>` | 1,056 files (45,216,455 rows in the first 681) | 2026-07-11 18:15 to 07-22 19:15 | Tick extract per shared expiry (file name = expiry): book, trade and Binance rows for the 15 minutes before |
 | `events/index` | 7 so far | | One row per extracted expiry: legs, lines, outcomes, row counts |
 
-`data/events/` was still being written on the remote at the time of the pull (it should reach
-2026-07-22), so re-run the pull. `load("events")` is all event files as one table; with
+The first delivery ended at the 07-18 20:45 expiry; the rest arrived later the same day and is
+kept apart as a test set (`july.SEEN_UNTIL`). `load("events")` is all event files as one table; with
 `start=`/`end=` it reads only the files whose window overlaps (six hours is about 1.3M rows, under
 a second). Any load of more than 500 MB on disk without `columns=` is refused (`max_bytes=None`
 overrides), which today means `historical/trades`; with five columns it is 266 MB in memory.

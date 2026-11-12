@@ -2,6 +2,7 @@
 
     python evidence.py summary       # the range trade on every dataset, pooled, and the sample still needed
     python evidence.py july          # the teammate's July tick recording (july.py), 07-11 to 07-18
+    python evidence.py holdout       # the second delivery of tick extracts (07-18 21:00 to 07-22), see HISTORY.md
     python evidence.py polls         # the July 3-second polls on the dates the tick recording does not cover
     python evidence.py november      # our own recording
     python evidence.py july --variants     # also the rule variants, on each half of the data
@@ -47,7 +48,7 @@ pd.set_option("display.max_rows", 500)
 
 
 # ============================================================================ data
-TIMING = {"july": (3, 1), "november": (3, 1), "polls": (6, 4)}     # seconds a signal must hold, then seconds to the fill
+TIMING = {"july": (3, 1), "holdout": (3, 1), "november": (3, 1), "polls": (6, 4)}     # seconds a signal must hold, then seconds to the fill
 
 
 class timing:
@@ -68,10 +69,12 @@ def dataset(name):
     """(signal table, outcomes, averaging windows) for 'july', 'polls' or 'november'."""
     if name == "july":
         return july.load().sort_values(["expiry", "ts"]).reset_index(drop=True), july.outcomes(), july.WINDOWS
-    if name == "polls":                       # only expiries the tick recording does not have: an independent sample
-        tick = july.load().expiry
+    if name == "holdout":
+        return july.load("holdout").sort_values(["expiry", "ts"]).reset_index(drop=True), july.outcomes(), july.WINDOWS
+    if name == "polls":                       # only expiries no tick extract covers: an independent sample
+        covered = set(july.load().expiry.unique()) | set(july.load("holdout").expiry.unique())
         polls = july.load_rest()
-        polls = polls[(polls.expiry < tick.min()) | (polls.expiry > tick.max())]
+        polls = polls[~polls.expiry.isin(covered)]
         return polls.sort_values(["expiry", "ts"]).reset_index(drop=True), july.outcomes(), july.WINDOWS
     start = int(load("health", 0, now_ms(), columns=["recv_ts"]).recv_ts.min())
     signals, _ = backtest.load_days(start, now_ms() - 60_000)
@@ -232,8 +235,39 @@ def range_trades(name, threshold=backtest.DEFAULT_THRESHOLD):
 
 
 DATASETS = {"july": "July tick recording, 07-11 to 07-18 (old settlement rule)",
-            "polls": "July 3-second polls, other dates 07-02 to 07-22 (old rule, coarser)",
+            "holdout": "July tick recording, 07-18 to 07-22, expectations fixed first",
+            "polls": "July 3-second polls, expiries without tick data (old rule, coarser)",
             "november": "Our recording, from 11-11 (current settlement rule)"}
+
+
+def size_at_fill(trades):
+    """Shares on offer at the touch of both legs when each July tick trade was filled (the smaller of the two)."""
+    files = {july.expiry_of(p) * 1000: p for part in ("tick", "holdout") for p in july.event_files(part)}
+    sizes = []
+    for t in trades.itertuples():
+        rows = pd.read_parquet(files[t.expiry], columns=["ts_ms", "rowtype", "leg", "bid_sz", "ask_sz", "ex_ms"])
+        rows["recv_ts"] = (rows.ts_ms - july.clock_offset_ms(rows)).round().astype("int64")
+        books = rows[rows.rowtype == "book"].sort_values("recv_ts", kind="stable")
+        fill = np.array([t.ts + backtest.DELAY_S * 1000], dtype="int64")
+        lo = votes.asof(fill, books[books.leg == t.lo], ["bid_sz", "ask_sz"]).iloc[0]
+        hi = votes.asof(fill, books[books.leg == t.hi], ["bid_sz", "ask_sz"]).iloc[0]
+        sizes.append(min(lo.ask_sz, hi.bid_sz) if t.side == "buy" else min(lo.bid_sz, hi.ask_sz))
+    return pd.Series(sizes, index=trades.index)
+
+
+def capacity(trades):
+    backtest.section("How much can be traded? Size at the best price when each July tick trade was filled")
+    shares = size_at_fill(trades).fillna(0)
+    q = shares.quantile([0.25, 0.5, 0.75])
+    print(f"Shares available on both legs at once: median {q[0.5]:.0f}, middle half {q[0.25]:.0f} to {q[0.75]:.0f} "
+          f"(a share pays $1 at most; the range costs {trades.price.mean() * 100:.0f} cents on average).")
+    days = (trades.expiry.max() - trades.expiry.min()) / 86_400_000
+    for cap in (50, 200, 1000):
+        taken = shares.clip(upper=cap)
+        print(f"  taking at most {cap:>4} shares per trade: ${(taken * trades.pnl_net).sum():,.0f} after fees over {days:.0f} days "
+              f"({len(trades)} trades, {taken.mean():.0f} shares per trade on average)")
+    print("This is what the top of the book would have filled. It ignores that our own order moves the price,")
+    print("and the dollar totals carry the same uncertainty as the cents per trade above.")
 
 
 def summary():
@@ -258,18 +292,21 @@ def summary():
             print(f"  {kind}: {mean:+.1f} c per trade, se {se:.1f}, 95% interval {mean - 1.96 * se:+.1f} to {mean + 1.96 * se:+.1f}, "
                   f"t = {mean / se:.1f}")
         return both
-    july_all = pool(pooled[:2], "July pooled (two samples with no expiry in common)")
-    everything = pool(pooled, "All three pooled")
+    pool(pooled[:2], "July tick recording, both deliveries")
+    july_all = pool(pooled[:-1], "July pooled (samples with no expiry in common)")
+    everything = pool(pooled, "All pooled")
     sd = everything.pnl_net.std(ddof=1) * 100
     print(f"\nOne trade's P&L has a standard deviation of {sd:.0f} cents. To tell a true edge after fees from zero at")
     print("two standard errors takes (2 x sd / edge)^2 trades:")
     for edge in (3, 5, 8):
         print(f"  true edge {edge} c: {int(np.ceil((2 * sd / edge) ** 2)):,} trades")
-    days = (pooled[2].expiry.max() - pooled[2].expiry.min()) / 86_400_000 if len(pooled[2]) > 1 else 0
-    print(f"The tick recording gave {len(pooled[0]) / 7.1:.0f} trades a day; ours has given {len(pooled[2])} in {days:.1f} days.")
+    days = (pooled[-1].expiry.max() - pooled[-1].expiry.min()) / 86_400_000 if len(pooled[-1]) > 1 else 0
+    print(f"The tick recording gave {len(pooled[0]) / 7.1:.0f} trades a day; ours has given {len(pooled[-1])} in {days:.1f} days.")
+
+    capacity(pd.concat(pooled[:2]))
 
     backtest.section("Does a bigger edge at entry mean a bigger profit? (July pooled, 2 cents minimum edge)")
-    low = pd.concat([range_trades(n, 0.02)[0] for n in ("july", "polls")])
+    low = pd.concat([range_trades(n, 0.02)[0] for n in ("july", "holdout", "polls")])
     low["edge"] = pd.cut(low.edge_at_entry * 100, [2, 4.5, 8, 12, 100], right=False)
     g = low.assign(c=low.pnl * 100, n_c=low.pnl_net * 100, e=low.edge_at_entry * 100).groupby("edge", observed=True)
     print(pd.DataFrame({"trades": g.size(), "edge at entry c": g.e.mean(), "P&L c": g.c.mean(),
@@ -343,7 +380,7 @@ def report(name, with_variants):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     name = args[0] if args else "summary"
-    if name not in ("july", "polls", "november", "summary"):
+    if name not in ("july", "holdout", "polls", "november", "summary"):
         sys.exit(__doc__)
     import io
     buffer, stdout = io.StringIO(), sys.stdout

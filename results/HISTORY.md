@@ -109,3 +109,22 @@ What would count as support: P&L per trade after fees above zero for the rule se
 toward the model 30 s after a lasting signal. The sample will be about 380 expiries, so about 50
 trades and a standard error near 6 cents: it cannot settle the question alone. It will be reported
 whatever it shows, alone and pooled with the earlier July trades.
+
+### Outcome (22:17 UTC, 375 expiries, 07-18 21:00 to 07-22 19:15)
+
+| Rule set | Trades | Won | P&L before fees (95% interval) | After fees | Price move after 30 s |
+|---|---|---|---|---|---|
+| baseline | 58 | 60% | +8.6 c (-2.7 to +20.0) | +6.4 c | +2.1 c (se 0.5) vs 7.2 c edge |
+| same_feed | 32 | 69% | +10.4 c (-2.9 to +23.6) | +8.4 c | +2.0 c (se 1.2) vs 9.2 c edge |
+| edge_8 | 38 | 63% | +13.4 c (-2.1 to +29.0) | +11.0 c | as baseline |
+
+All three meet what was written down: positive after fees, price moving toward the model. None is
+significant alone, as expected. Both tick deliveries together, baseline: 164 trades, +8.5 c before
+fees (se 3.1), +6.3 c after (95% interval +0.2 to +12.3). Caveat: the 3-second polls for these four
+days had been run before the expectations were written (27 trades, +7.9 c, se 9), so the period was
+not wholly unseen; its tick data was. With the tick data in hand, the poll sample now counts only
+expiries without tick data (940 expiries, 63 trades, +1.0 c before fees, se 6.0).
+
+The rules of record are unchanged (v4). `same_feed` and `edge_8` are tracked alongside in
+`variants.py`. Results by variant: `variants_july.csv` (first delivery, each half),
+`variants_holdout.csv`, `variant_runs.csv` (our recording).
