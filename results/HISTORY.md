@@ -257,3 +257,25 @@ public trades. `maker.py`.
 - **Otherwise:** undecided.
 - July (recorded book, exact trade times) is run the same way and reported, but does not decide.
 - One specification, run once. No other resting time, price or fill rule will be tried on this data.
+
+### Outcome (run once, 00:45 UTC on 11-13, `python maker.py`)
+
+| Data | Signals | Legs filled (strict) | Per signal, strict fills (95% interval) | Per signal, filled at the price (upper bound) | Taking, after fees |
+|---|---|---|---|---|---|
+| July tick recording (old rule) | 164 | 63% | +2.8 c (-3.3 to +8.9) | +6.3 c | +6.3 c |
+| Today's rule, 08-20 to 10-12 | 544 | 60% | -1.4 c (-4.7 to +1.9) | +0.3 c | -0.0 c |
+| Today's rule, 10-13 to 11-11 | 252 | 57% | -3.2 c (-8.3 to +1.8) | -2.7 c | -2.0 c |
+| **All of today's rule** | 796 | 59% | **-2.0 c (se 1.4; -4.7 to +0.8)** | -0.7 c (-3.5 to +2.1) | -0.6 c |
+
+"Taking, after fees" is on the same signals and here excludes the 0.9 c tape correction.
+
+- **Not viable**, by the rule written down: under strict fills the upper end of the 95% interval
+  on all of today's rule is +0.8 c per signal, below +1 c.
+- Even if every order were first in the queue (the upper bound) the result is -0.7 c per signal.
+- A filled leg makes -1.7 c under today's rule (se 1.4). The order is filled 59% of the time, and
+  those are the times the price went through it: what the resting order saves in spread and fee,
+  it loses by being filled when the signal was wrong.
+- On July resting orders made less than taking did (+2.8 c against +6.3 c after fees), for the
+  same reason: the good signals moved away before the order was filled.
+
+No other resting time, price or fill rule has been run.

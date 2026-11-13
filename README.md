@@ -11,7 +11,7 @@ Everything here is read-only market data. Nothing places orders, and nothing tou
 
 **In one line:** contracts that expire together do disagree by more than noise, and the price does
 move toward our model afterwards, but under today's settlement rule the trade built on it does not
-cover the exchange's fee. The signal is real as a measurement and not a strategy to fund as it stands.
+cover the exchange's fee, and resting orders instead of taking do no better. The signal is real as a measurement and not a strategy to fund as it stands.
 
 | Data | Settlement rule | Shared expiries | Trades | Per trade before fees | After fees |
 |---|---|---|---|---|---|
@@ -48,10 +48,18 @@ then the eight weeks back to the change of rule.
   That is a fifth of the edge the model sees, and less than the spread and fee it costs to trade.
 - **Size is small in any case:** a median of 53 shares at the best price at the fill in July.
 
-**What would have to change for this to be worth more work:** trading without the taker fee
-(resting orders pay none, but then fills are not guaranteed and that is a different strategy,
-untested here), or a market where the fee is lower. More recording of the same thing will not
-change the answer: 802 trades already put the after-fee result between -4.6 and +0.9 cents.
+- **Resting orders do not rescue it.** The same signals executed with orders resting at the best
+  price for 30 seconds (no taker fee; counted as filled only when the market trades through them)
+  made -2.0 c per signal under today's rule (796 signals, 95% interval -4.7 to +0.8), specified
+  before it was run (`maker.py`). The orders fill mostly when the signal was wrong.
+
+**Bottom line for the committee:** every route tested under today's rule ends at or below zero:
+taking (-1.9 c after fees), resting orders (-2.0 c), and two rule changes that failed on unseen
+data. More recording of the same thing will not change this: 802 trades already put the taker
+result between -4.6 and +0.9 cents. What can be presented is a sound method, a result that held
+under the old rule, and a clear reason not to trade it now. A fundable strategy would need a
+different idea (other contract families, or a signal built on the 30-second price move itself),
+which would be a new project with its own test.
 
 - **Recorder:** running since 2026-11-11 20:53 UTC as the Windows task `PolyRecorder`, writing to
   `C:\polydata`. Our recorded line matched the official one to the cent on every window checked.
@@ -85,6 +93,7 @@ Run from this folder with the project's Python (`C:\polydata\venv\Scripts\python
 | `python evidence.py july` (or `holdout`, `polls`, `november`, `now`, `autumn`) | Threshold-free tests on one dataset: does the other contract's width predict the outcome or the next price move? Add `--variants` for every rule variant | 1 to 10 min |
 | `python july.py build` | Rebuilds the July signal tables from the shared dataset (needs the two steps under "Shared dataset" first) | 3 min |
 | `python scripts/fetch_july_reference.py` | Official July lines and outcomes (Polymarket) and Binance 1-second candles, into `C:\polydata\reference` | 5 min |
+| `python maker.py` | The frozen signals executed with resting orders instead of taking (specification in `results/HISTORY.md`) | 2 min |
 | `python tape.py validate` / `check` | The trade-built quotes against the recorded book: on July, and on our own recording under today's rule | 3 min |
 | `python tape.py fetch <first day> <last day>`, then `python tape.py build now` | Public lines, candles and trades for a period, and its signal table (periods are named in `tape.PERIODS`) | 40 s per day |
 | `python -m unittest discover tests` | 51 tests | 2 s |
@@ -128,6 +137,7 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
 | `simulation_check.py` | The same engine on simulated markets where the truth is known |
 | `july.py` | The same rules on the teammate's July recording (tick extracts and 3-second polls) |
 | `evidence.py` | The signal tests and the pooled summary across datasets |
+| `maker.py` | Resting-order execution of the same signals, fills simulated from public trades |
 | `tape.py` | The same rules on Polymarket's public trade tape, with quotes rebuilt from trades (today's settlement rule) |
 | `scripts/` | `pull_shared.py` (mirror the shared dataset), `fetch_july_reference.py` (public reference data for July) |
 | `svgplot.py` | Small plot writer (SVG), so no plotting library is needed |

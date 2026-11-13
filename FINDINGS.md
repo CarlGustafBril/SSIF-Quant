@@ -693,3 +693,27 @@ Not established. The candidates, none of them tested:
    recorder stores it) and a model of when resting orders get filled.
 2. Should the recorder keep running? It costs 4 to 5 GB a day. A few weeks of it would confirm
    the tape result on the real feed; it is not needed for the conclusion above.
+
+### Addendum: the same signals with resting orders (2026-11-13, 00:45 UTC)
+
+The one execution route Phase 4 left untested was providing liquidity: rest an order at the best
+price on our side instead of crossing, pay no taker fee, and accept that fills are not certain.
+It was specified and committed before the first run (`results/HISTORY.md`, commit `c130751`) and
+run once (`maker.py`): one second after each frozen-rule signal, one order per leg at the bid (to
+buy) or ask (to sell), resting 30 seconds, counted as filled only if the market trades through its
+price ("strict", as if last in the queue), filled legs held to expiry, no fee and no rebate.
+
+| Data | Signals | Legs filled (strict) | Per signal, strict fills (95% interval) | Per signal, filled at the price (upper bound) | Taking, after fees |
+|---|---|---|---|---|---|
+| July tick recording (old rule) | 164 | 63% | +2.8 c (-3.3 to +8.9) | +6.3 c | +6.3 c |
+| Today's rule, 08-20 to 10-12 | 544 | 60% | -1.4 c (-4.7 to +1.9) | +0.3 c | -0.0 c |
+| Today's rule, 10-13 to 11-11 | 252 | 57% | -3.2 c (-8.3 to +1.8) | -2.7 c | -2.0 c |
+| **All of today's rule** | 796 | 59% | **-2.0 c (se 1.4; -4.7 to +0.8)** | -0.7 c (-3.5 to +2.1) | -0.6 c |
+
+- **Not viable** by the rule written beforehand (upper end of the strict interval below +1 c).
+  Assuming we were always first in the queue does not rescue it (-0.7 c).
+- The reason is adverse selection: a resting order is filled when the price moves through it, and
+  a filled leg then makes -1.7 c (se 1.4). After a good signal the price moves toward the model,
+  which is away from our order, so the good signals are the ones that do not fill.
+- This closes the routes available with this signal on these contracts: taking loses the fee,
+  resting loses to adverse selection, and the two rule changes tried did not survive unseen data.
