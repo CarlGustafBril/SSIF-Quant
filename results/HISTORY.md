@@ -279,3 +279,30 @@ public trades. `maker.py`.
   same reason: the good signals moved away before the order was filled.
 
 No other resting time, price or fill rule has been run.
+
+## The same rules on other coins (2026-11-13, from 01:00 UTC)
+
+Polymarket lists the same 5m, 15m and 1h Up or Down contracts for ETH, SOL and XRP, with the same
+settlement rule (60-second Chainlink average; Binance candle for the 1h) and the same fee. They
+trade less than BTC (on one 15m window checked: ETH $10,600, SOL $2,400, XRP $1,300 against BTC
+$24,100), so they may be priced less tightly. Nothing from them has been fetched except that one
+window's volume, line and trade count. `assets.py`; `tape.py` with `POLY_ASSET` set.
+
+### Written down before fetching
+
+- **Data:** 2026-10-13 to 2026-11-11, every shared expiry of each coin (about 2,870 each), public
+  trade tape with quotes rebuilt as for BTC (stamps moved 4 s earlier), official lines and
+  outcomes, Binance 1-second candles of the coin's USDT pair.
+- **Rules:** the frozen rules, nothing changed: same thresholds, same tail parameter (fitted on
+  BTC), same error bars, 3 s persistence, 1 s to the fill, taker fee, and 0.9 c taken off for the
+  tape (measured on BTC in July; on thinner books it is probably more, so this favours the coins).
+- **Judged:** the baseline only, on ETH, SOL and XRP separately and pooled.
+- **Supported:** pooled over the three coins, P&L per trade after fees and the 0.9 c is more than
+  two standard errors above zero, and ETH (the most liquid) is positive on its own.
+- **Not worth trading:** the upper end of the pooled 95% interval is below +3 c.
+- **Otherwise:** undecided.
+- **Validity checks reported with it, whatever they show:** how often a rebuilt quote exists (thin
+  trading may leave too few), and whether the error bars fit (typical disagreement between
+  contracts near 1.0). A coin whose error bars are off by more than 30% is reported but its result
+  is marked as unreliable.
+- One run per coin. No rule or parameter will be adjusted on this data.

@@ -38,8 +38,15 @@ import july
 import votes
 from recorder import config
 
+# The same contracts exist for other coins. POLY_ASSET=eth (sol, xrp) in the environment switches every
+# path and slug below; an environment variable, so that worker processes see it too. Default: btc.
+ASSETS = {"btc": ("bitcoin", "BTCUSDT"), "eth": ("ethereum", "ETHUSDT"), "sol": ("solana", "SOLUSDT"), "xrp": ("xrp", "XRPUSDT")}
+ASSET = os.environ.get("POLY_ASSET", "btc").lower()
+LONG_NAME, SYMBOL = ASSETS[ASSET]
+SUFFIX = "" if ASSET == "btc" else f"_{ASSET}"
 REFERENCE = os.path.join(config.DATA_DIR, "reference")
-TAPE_DIR = os.path.join(REFERENCE, "tape")
+TAPE_DIR = os.path.join(REFERENCE, "tape" + SUFFIX)
+CANDLES = os.path.join(REFERENCE, "binance_1s.parquet" if ASSET == "btc" else f"binance_1s_{SYMBOL}.parquet")
 OUT_DIR = os.path.join(config.DATA_DIR, "analysis")
 TRADES_URL = "https://data-api.polymarket.com/v2/trades"
 MAX_TRADE_AGE_S = 15
@@ -262,7 +269,7 @@ def hourly_slug(open_s):
     """Slug of the 1h contract opening at a UTC second: bitcoin-up-or-down-november-12-2026-4pm-et."""
     t = pd.Timestamp(open_s, unit="s", tz="UTC").tz_convert("America/New_York")
     hour = t.hour % 12 or 12
-    return f"bitcoin-up-or-down-{t.strftime('%B').lower()}-{t.day}-{t.year}-{hour}{'am' if t.hour < 12 else 'pm'}-et"
+    return f"{LONG_NAME}-up-or-down-{t.strftime('%B').lower()}-{t.day}-{t.year}-{hour}{'am' if t.hour < 12 else 'pm'}-et"
 
 
 def contracts_for(first_day, last_day):
@@ -271,11 +278,11 @@ def contracts_for(first_day, last_day):
     end = int(pd.Timestamp(last_day, tz="UTC").timestamp()) + 86_400
     rows = []
     for close in range(start + 900, end + 1, 900):
-        rows.append({"slug": f"btc-updown-15m-{close - 900}", "length": "15m", "close_ts": close})
-        rows.append({"slug": f"btc-updown-5m-{close - 300}", "length": "5m", "close_ts": close})
+        rows.append({"slug": f"{ASSET}-updown-15m-{close - 900}", "length": "15m", "close_ts": close})
+        rows.append({"slug": f"{ASSET}-updown-5m-{close - 300}", "length": "5m", "close_ts": close})
         if close % 3600 == 0:
             rows.append({"slug": hourly_slug(close - 3600), "length": "1h", "close_ts": close})
-    extra = [{"slug": f"btc-updown-5m-{close - 300}", "length": "5m", "close_ts": close}      # the other 5-minute boundaries, for the gap
+    extra = [{"slug": f"{ASSET}-updown-5m-{close - 300}", "length": "5m", "close_ts": close}      # the other 5-minute boundaries, for the gap
              for close in range(start + 300, end + 1, 300) if close % 900]
     return pd.DataFrame(rows), pd.DataFrame(extra)
 
@@ -351,6 +358,29 @@ def fetch_trades_one(args):
     return slug, out
 
 
+def download_candles(days):
+    """Binance 1-second candles of this asset's pair for those days, from the public daily files."""
+    import io
+    import zipfile
+
+    import requests
+    have = pd.read_parquet(CANDLES) if os.path.exists(CANDLES) else pd.DataFrame(columns=["open_ts", "open", "close"])
+    done = set(pd.to_datetime(have.open_ts, unit="ms").dt.strftime("%Y-%m-%d").unique()) if len(have) else set()
+    parts = [have]
+    for day in days:
+        if day in done:
+            continue
+        r = requests.get(f"https://data.binance.vision/data/spot/daily/klines/{SYMBOL}/1s/{SYMBOL}-1s-{day}.zip", timeout=120)
+        r.raise_for_status()
+        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+            k = pd.read_csv(z.open(z.namelist()[0]), header=None, usecols=[0, 1, 4], names=["open_ts", "open", "close"])
+        if k.open_ts.iloc[0] > 10 ** 14:
+            k["open_ts"] //= 1000
+        parts.append(k)
+    pd.concat(parts, ignore_index=True).drop_duplicates("open_ts").sort_values("open_ts").to_parquet(CANDLES)
+    print(f"  candles {SYMBOL}: {len(parts) - 1} days added", flush=True)
+
+
 def ensure_candles(first_day, last_day):
     """Binance 1-second candles for those days: the public daily files, or, for a day Binance has not
     published yet (the current day), the candles our own recorder received."""
@@ -358,7 +388,9 @@ def ensure_candles(first_day, last_day):
 
     import scripts.fetch_july_reference as public
     from recorder.reader import load as load_recorded
-    path = os.path.join(REFERENCE, "binance_1s.parquet")
+    if ASSET != "btc":
+        return download_candles(pd.date_range(first_day, last_day).strftime("%Y-%m-%d"))
+    path = CANDLES
     for day in pd.date_range(first_day, last_day).strftime("%Y-%m-%d"):
         public.FIRST_DAY = public.LAST_DAY = day
         try:
@@ -403,7 +435,7 @@ def now_reference():
         return _NOW
     lines = pd.read_parquet(os.path.join(TAPE_DIR, "lines.parquet"))
     lines["open_ts"] = lines.close_ts - lines.length.map(LENGTH_S)
-    candles = pd.read_parquet(os.path.join(REFERENCE, "binance_1s.parquet")).set_index("open_ts").sort_index()
+    candles = pd.read_parquet(CANDLES).set_index("open_ts").sort_index()
     chain = lines[lines.length.isin(["5m", "15m"])]
     at = pd.concat([pd.Series(chain.line.values, index=chain.open_ts.values),
                     pd.Series(chain.final.values, index=chain.close_ts.values)]).dropna()
@@ -443,7 +475,7 @@ PERIODS = {"now": ("2026-10-13", "2026-11-11"),          # the first test under 
 
 
 def now_path(period="now"):
-    return os.path.join(OUT_DIR, f"tape_{period}.parquet")
+    return os.path.join(OUT_DIR, f"tape_{period}{SUFFIX}.parquet")
 
 
 def build(period="now", workers=6):
