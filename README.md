@@ -53,13 +53,17 @@ then the eight weeks back to the change of rule.
   made -2.0 c per signal under today's rule (796 signals, 95% interval -4.7 to +0.8), specified
   before it was run (`maker.py`). The orders fill mostly when the signal was wrong.
 
+- **Other coins (ETH, SOL, XRP): untested, not rejected.** The same rules look profitable there on
+  quotes rebuilt from public trades (+5.2 c after fees, 519 trades), but that is an artefact: those
+  markets trade too rarely to rebuild a quote, and at prices that really traded the result is
+  -1.2 c (89 trades, se 3.9). Only a recording of their order books can test them (`assets.py`).
+
 **Bottom line for the committee:** every route tested under today's rule ends at or below zero:
 taking (-1.9 c after fees), resting orders (-2.0 c), and two rule changes that failed on unseen
 data. More recording of the same thing will not change this: 802 trades already put the taker
 result between -4.6 and +0.9 cents. What can be presented is a sound method, a result that held
-under the old rule, and a clear reason not to trade it now. A fundable strategy would need a
-different idea (other contract families, or a signal built on the 30-second price move itself),
-which would be a new project with its own test.
+under the old rule, and a clear reason not to trade it now. The one open lead is the thinner
+markets (ETH, SOL, XRP), which need their own order-book recording before anything can be said.
 
 - **Recorder:** running since 2026-11-11 20:53 UTC as the Windows task `PolyRecorder`, writing to
   `C:\polydata`. Our recorded line matched the official one to the cent on every window checked.
@@ -93,6 +97,7 @@ Run from this folder with the project's Python (`C:\polydata\venv\Scripts\python
 | `python evidence.py july` (or `holdout`, `polls`, `november`, `now`, `autumn`) | Threshold-free tests on one dataset: does the other contract's width predict the outcome or the next price move? Add `--variants` for every rule variant | 1 to 10 min |
 | `python july.py build` | Rebuilds the July signal tables from the shared dataset (needs the two steps under "Shared dataset" first) | 3 min |
 | `python scripts/fetch_july_reference.py` | Official July lines and outcomes (Polymarket) and Binance 1-second candles, into `C:\polydata\reference` | 5 min |
+| `python assets.py pooled` | The same rules on ETH, SOL and XRP (after `tape.py fetch` and `build` with `POLY_ASSET` set), at rebuilt quotes and at real traded prices | 1 min |
 | `python maker.py` | The frozen signals executed with resting orders instead of taking (specification in `results/HISTORY.md`) | 2 min |
 | `python tape.py validate` / `check` | The trade-built quotes against the recorded book: on July, and on our own recording under today's rule | 3 min |
 | `python tape.py fetch <first day> <last day>`, then `python tape.py build now` | Public lines, candles and trades for a period, and its signal table (periods are named in `tape.PERIODS`) | 40 s per day |
@@ -137,6 +142,7 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
 | `simulation_check.py` | The same engine on simulated markets where the truth is known |
 | `july.py` | The same rules on the teammate's July recording (tick extracts and 3-second polls) |
 | `evidence.py` | The signal tests and the pooled summary across datasets |
+| `assets.py` | The same rules on other coins, with the check of fills against real trades |
 | `maker.py` | Resting-order execution of the same signals, fills simulated from public trades |
 | `tape.py` | The same rules on Polymarket's public trade tape, with quotes rebuilt from trades (today's settlement rule) |
 | `scripts/` | `pull_shared.py` (mirror the shared dataset), `fetch_july_reference.py` (public reference data for July) |

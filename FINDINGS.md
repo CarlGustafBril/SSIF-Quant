@@ -717,3 +717,29 @@ price ("strict", as if last in the queue), filled legs held to expiry, no fee an
   which is away from our order, so the good signals are the ones that do not fill.
 - This closes the routes available with this signal on these contracts: taking loses the fee,
   resting loses to adverse selection, and the two rule changes tried did not survive unseen data.
+
+### Addendum: the same rules on ETH, SOL and XRP (2026-11-13, 01:00 to 01:45 UTC)
+
+The same three contract lengths exist for ETH, SOL and XRP, with the same settlement rule and fee,
+and they trade less than BTC. The frozen rules were run on them unchanged for 2026-10-13 to 11-11,
+from the public trade tape, after the test was written down and committed (`8eeba9f`). Code:
+`assets.py`, and `tape.py` with the environment variable `POLY_ASSET` set.
+
+| Coin | Trades at rebuilt quotes | Before fees | After fees and 0.9 c | Rebuilt quote present (5m / 15m / 1h) | Both legs really traded within 10 s | Rebuilt quote better than real prices by | At real prices, after fees |
+|---|---|---|---|---|---|---|---|
+| BTC (same 30 days) | 252 | +0.2 c (se 2.5) | -2.9 c | nearly always | 71% | 0.6 c | -1.7 c (se 3.0), 180 trades |
+| ETH | 185 | +6.5 c (se 2.7) | +3.5 c (-1.8 to +8.9) | 86% / 72% / 10% | 32% | 5.1 c | -2.0 c (se 5.0), 60 trades |
+| SOL | 174 | +8.9 c (se 2.7) | +5.9 c (+0.7 to +11.2) | 78% / 47% / 4% | 9% | 13.8 c | +0.1 c (se 9.3), 16 trades |
+| XRP | 160 | +9.3 c (se 2.6) | +6.3 c (+1.3 to +11.4) | 63% / 38% / 3% | 8% | 12.2 c | +1.3 c (se 7.5), 13 trades |
+| ETH, SOL and XRP together | 519 | +8.2 c | +5.2 c | | 17% | 7.7 c | -1.2 c (se 3.9; -8.7 to +6.4), 89 trades |
+
+- **On rebuilt quotes all three coins look profitable, and it is an artefact.** Their trades are
+  too sparse to rebuild a quote from: the "quote" is often a trade 10 to 15 s old, the reference
+  price has moved since, and the rules trade against a price that no longer exists. Paid for at
+  the next real trades, the rebuilt quotes turn out 5 to 14 c too good, and the 89 trades that
+  could really have been done on both legs made -1.2 c after fees (se 3.9).
+- The same check on BTC changes nothing (0.6 c), which both confirms the BTC result of Phase 4 and
+  shows the check itself is not what removes the profit.
+- **So the other coins are untested, not rejected.** Thin markets are where a mispricing could
+  survive, and also where this instrument fails. Their order books would have to be recorded. Our
+  recorder can do that with a configuration change; it has not been changed.

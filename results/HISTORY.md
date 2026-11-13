@@ -306,3 +306,34 @@ window's volume, line and trade count. `assets.py`; `tape.py` with `POLY_ASSET` 
   contracts near 1.0). A coin whose error bars are off by more than 30% is reported but its result
   is marked as unreliable.
 - One run per coin. No rule or parameter will be adjusted on this data.
+
+### Outcome (01:45 UTC on 11-13, one run per coin, `python assets.py run`, `fills`, `pooled`)
+
+| Coin | Trades at rebuilt quotes | Before fees | After fees and 0.9 c | Rebuilt quote present (5m / 15m / 1h) | Both legs really traded within 10 s | Rebuilt quote better than real prices by | At real prices, after fees |
+|---|---|---|---|---|---|---|---|
+| BTC (same 30 days) | 252 | +0.2 c (se 2.5) | -2.9 c | nearly always | 71% | 0.6 c | -1.7 c (se 3.0), 180 trades |
+| ETH | 185 | +6.5 c (se 2.7) | +3.5 c (-1.8 to +8.9) | 86% / 72% / 10% | 32% | 5.1 c | -2.0 c (se 5.0), 60 trades |
+| SOL | 174 | +8.9 c (se 2.7) | +5.9 c (+0.7 to +11.2) | 78% / 47% / 4% | 9% | 13.8 c | +0.1 c (se 9.3), 16 trades |
+| XRP | 160 | +9.3 c (se 2.6) | +6.3 c (+1.3 to +11.4) | 63% / 38% / 3% | 8% | 12.2 c | +1.3 c (se 7.5), 13 trades |
+| ETH, SOL and XRP together | 519 | +8.2 c | +5.2 c | | 17% | 7.7 c | -1.2 c (se 3.9; -8.7 to +6.4), 89 trades |
+
+- **By the letter of what was written down, the three coins together are "supported"** (+5.2 c
+  after fees, more than two standard errors above zero; ETH positive). **It is not counted,**
+  because the validity check that was to be reported with it shows the profit comes from the
+  instrument, not the market.
+- A rebuilt quote can be 15 s old. On these coins trades are sparse (a rebuilt quote exists on 38
+  to 86% of seconds for the 5m and 15m, 3 to 10% for the 1h). An old quote next to a fresh
+  reference price looks like a mispricing, the rules "buy" at it, and the next real trade shows the
+  price had already moved. The sign of this was the price "moving" 5 to 8.5 c toward the model
+  within 30 s, against 1.5 c on BTC.
+- A second check was added after seeing that (so it was not written down beforehand; it can only
+  lower the result): pay for each leg at the next real taker trade on our side, from 1 s after the
+  entry and within 10 s. On BTC this changes almost nothing (rebuilt quotes were 0.6 c too good,
+  close to the 0.9 c measured in July, and the verdict is the same). On the other coins the
+  rebuilt quotes were 5 to 14 c too good, both legs really traded in only 17% of cases, and those
+  89 trades made -1.2 c after fees (se 3.9).
+- Error bars: contracts disagree by 0.59 to 0.71 error bars for the 5m and 15m pair on these coins
+  (1.0 is right), so the bars are 30 to 40% too wide there, which the specification said makes a
+  coin's result unreliable.
+- **Verdict: the public trade tape cannot test these coins.** Nothing is shown for or against the
+  rules there. Recording their order books, as we do for BTC, is the only way to find out.
