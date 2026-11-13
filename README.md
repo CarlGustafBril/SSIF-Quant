@@ -7,7 +7,7 @@ markets and tests whether the prices disagree with each other by enough to trade
 
 Everything here is read-only market data. Nothing places orders, and nothing touches `trader.py`.
 
-## Status (2026-11-13, 09:45 UTC)
+## Status (2026-11-13, 11:10 UTC)
 
 **In one line:** contracts that expire together do disagree by more than noise, and the price does
 move toward our model afterwards, but under today's settlement rule the trade built on it does not
@@ -59,6 +59,8 @@ then the eight weeks back to the change of rule.
   makes +2.4 c before fees under today's rule (1,166 trades, se 1.2) against +1.6 c; with an
   empirical return distribution instead of the Student-t (`empirical.py`) it makes +2.7 c (769
   trades, se 1.4). Both were specified before being run. After fees all three are below zero.
+  Moving the Chainlink price forward with Binance makes its error a third smaller (confirmed on
+  two hours of new recording); whether that earns anything needs 30 trades on our own recording.
   Why a Student-t was chosen, with the evidence, is in `FINDINGS.md`, Phase 5.
 
 - **Other coins (ETH, SOL, XRP): untested, not rejected.** The same rules look profitable there on

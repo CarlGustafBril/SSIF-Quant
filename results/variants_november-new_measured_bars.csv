@@ -1,0 +1,7 @@
+data,variant,period,events,seconds_2plus_votes,signal_rate,lasting_signals,lasting_events,move30_c,move30_se_c,edge_seen_c,trades,trades_resolved,hit_rate,pnl_c_per_trade,pnl_ci_low_c,pnl_ci_high_c,net_c_per_trade,net_ci_low_c,net_ci_high_c,pnl_se_c,pair_seconds,pairs_beyond_limit,pair_z_spread,run_utc,code_version
+november-new,baseline,all,8,1208,0.0091,0,0,,,,0,0,,,,,,,,,1202,0.0092,0.75,2026-11-13 11:06:26,6acffc7
+november-new,baseline,design,4,459,0.0131,0,0,,,,0,0,,,,,,,,,459,0.0131,0.689,2026-11-13 11:06:26,6acffc7
+november-new,baseline,confirm,4,749,0.0067,0,0,,,,0,0,,,,,,,,,743,0.0067,0.776,2026-11-13 11:06:26,6acffc7
+november-new,measured_bars,all,8,1208,0.0108,0,0,,,,0,0,,,,,,,,,1212,0.0107,0.966,2026-11-13 11:06:26,6acffc7
+november-new,measured_bars,design,4,459,0.0196,0,0,,,,0,0,,,,,,,,,461,0.0195,0.897,2026-11-13 11:06:26,6acffc7
+november-new,measured_bars,confirm,4,749,0.0053,0,0,,,,0,0,,,,,,,,,751,0.0053,0.958,2026-11-13 11:06:26,6acffc7

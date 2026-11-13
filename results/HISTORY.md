@@ -492,7 +492,7 @@ their earlier numbers on both periods (544 and 252 trades, +2.2 and +0.2 c).
 - Nothing was re-fitted after the run. The two variants together were not run, because that
   combination was not written down.
 
-### Written down before it is run: the moved-forward Chainlink price on seconds not yet looked at (09:55 UTC on 11-13)
+### Written down before it is run: the moved-forward Chainlink price on seconds not yet looked at (09:45 UTC on 11-13)
 
 The run above could not include one part of `measured_bars`: moving the Chainlink price forward
 with Binance. The public tape has no Chainlink feed. (Its stand-in is already Binance carried
@@ -520,3 +520,29 @@ the bars were measured on it up to 09:00 UTC today. So the test is on what was r
   P&L before fees is then at least two standard errors above zero and above the frozen rules' on
   the same events. Until then the moved-forward price is confirmed or not as a better price, and
   untested as a source of profit.
+
+### Outcome (run once at 11:04 UTC on 11-13, code `6acffc7`; 7,095 seconds, 8 shared expiries)
+
+`python bars.py check`, then `python evidence.py variants november-new baseline measured_bars`.
+
+| Reference price | Typical error | Root mean square | Bar on these seconds | Measured bar (from before 09:00) | Beyond 2.5 measured bars |
+|---|---|---|---|---|---|
+| Last Chainlink price received (frozen rules) | $1.6 | $5.3 | $7.7 | $7.9 | 1.0% |
+| The same moved forward with Binance | $1.3 | $3.5 | $5.0 | $5.3 | 1.0% |
+| Last closed Binance second (hourly contract) | $0.02 | $4.2 | $6.7 | $6.4 | 1.5% |
+
+- **Test 1, the price: confirmed.** The bar of the moved-forward price is 35% smaller than that of
+  the last received price on seconds it was not measured on (33% where it was measured; 20% was
+  required). Root mean square error 33% smaller.
+- **Test 2, the size of the measured bar: right.** The moved-forward price is off by more than 2.5
+  measured bars on 1.0% of these seconds (1.2% intended, 0.6 to 2.4% required). The Binance bar
+  holds too (1.5%).
+- **Test 3, trading: nothing to report on profit.** Neither the frozen rules nor `measured_bars`
+  traded in the two hours (no signal lasted 3 seconds). Seconds beyond 2.5 bars: 0.9% under the
+  frozen rules, 1.1% under `measured_bars`, of 1,208 seconds with two votes; spread 0.75 against
+  0.97. No verdict, as written beforehand.
+- A correction to the specification: it said "about 24 five-minute expiries". Shared expiries are
+  the quarter-hours, so two hours hold 8 events. This changes nothing in the tests.
+- **So the moved-forward Chainlink price is confirmed as a better price with a correctly sized
+  bar, and remains untested as a source of profit.** The standing rule applies: one more run when
+  our recording holds 30 `measured_bars` trades on events after 09:00 UTC on 11-13.

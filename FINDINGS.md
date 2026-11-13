@@ -805,8 +805,9 @@ Both were specified, with their verdict rules, before being run on the public ta
 - **Even with bars of the right size, contracts disagree beyond 2.5 bars on 5 to 8% of seconds**
   where noise alone would give about 1%. The excess is real disagreement between contracts. It is
   what the strategy trades, and under today's rule it is worth 1 to 3 c, not the 7 c the model sees.
-- **Still untested:** the moved-forward Chainlink price in trading terms. Only our own recording
-  has the feed for it, and it holds 11 trades. This is the one reason left to keep recording.
+- **Tested separately, below:** the moved-forward Chainlink price. Only our own recording has the
+  feed for it. It is confirmed as a better price; as a source of profit it needs more trades than
+  the recording holds, which is the one reason left to keep recording.
 
 ### Why a Student-t, and how the alternatives compare
 
@@ -856,3 +857,25 @@ What the t gets wrong, for the record:
   while the fitted scale of the t is 0.74 to 0.80. So the realised-vol vote is 13 to 22% too low.
   It is used only when three contracts vote (146 of 1,166 trades), and it is not changed here. The
   empirical variant does not have this problem, because its unit is realised volatility itself.
+
+### The moved-forward Chainlink price on new seconds (2026-11-13, 09:00 to 11:00 UTC)
+
+The public tape has no Chainlink feed, so the part of `measured_bars` that moves the Chainlink
+price forward with Binance could not be in the run above. It was tested on the two hours of our
+own recording that followed the measurement, specified first and run once (`python bars.py check`).
+
+| Reference price | Typical error | Root mean square | Bar on these seconds | Measured bar (from before 09:00) | Beyond 2.5 measured bars |
+|---|---|---|---|---|---|
+| Last Chainlink price received (frozen rules) | $1.6 | $5.3 | $7.7 | $7.9 | 1.0% |
+| The same moved forward with Binance | $1.3 | $3.5 | $5.0 | $5.3 | 1.0% |
+| Last closed Binance second (hourly contract) | $0.02 | $4.2 | $6.7 | $6.4 | 1.5% |
+
+- **It is a better price**: the bar is 35% smaller than for the last price received, on seconds
+  the bars were not measured on (33% where they were).
+- **The measured bars are the right size out of sample**: errors exceed 2.5 bars on 1.0% of
+  seconds, against the 1.2% they were sized for.
+- **Seconds beyond 2.5 bars between contracts:** 0.9% under the frozen rules and 1.1% under
+  `measured_bars` (1,208 seconds in 8 shared expiries); spread 0.75 against 0.97.
+- **Profit per trade: no trades.** Neither version traded in these two hours, so there is no P&L
+  and no standard error to report. The verdict waits for 30 trades on our own recording (the rule
+  is in `results/HISTORY.md`).
