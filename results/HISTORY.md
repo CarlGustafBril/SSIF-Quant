@@ -491,3 +491,32 @@ their earlier numbers on both periods (544 and 252 trades, +2.2 and +0.2 c).
   needs our own recording, which has 11 trades.
 - Nothing was re-fitted after the run. The two variants together were not run, because that
   combination was not written down.
+
+### Written down before it is run: the moved-forward Chainlink price on seconds not yet looked at (09:55 UTC on 11-13)
+
+The run above could not include one part of `measured_bars`: moving the Chainlink price forward
+with Binance. The public tape has no Chainlink feed. (Its stand-in is already Binance carried
+forward from the last official Chainlink price, up to 5 minutes back, so the idea is present
+there in a coarser form.) The only data that can test the real thing is our own recording, and
+the bars were measured on it up to 09:00 UTC today. So the test is on what was recorded after that.
+
+- **Data:** our recording from 2026-11-13 09:00 UTC to 11:00 UTC. Nothing was measured or looked
+  at there. Two hours is all there is today; the limits of that are below.
+- **Run:** once, after 11:00 UTC: `python bars.py check`, then
+  `python evidence.py variants november-new baseline measured_bars` (events that start at or after
+  09:00 and expire by 11:00).
+- **Test 1, the price itself (about 7,200 seconds, enough to judge).** Confirmed if, on these
+  seconds, the bar of the moved-forward price is at least 20% smaller than the bar of the last
+  received price (it was 33% smaller where it was measured). "Bar" as before: the size that 1.2%
+  of errors exceed by 2.5 times.
+- **Test 2, the size of the measured bar.** Right size if the moved-forward price is off by more
+  than 2.5 measured bars on between 0.6% and 2.4% of these seconds (1.2% intended).
+- **Test 3, trading.** Reported whatever comes out: the share of seconds beyond 2.5 bars and the
+  spread against the frozen rules, and P&L per trade before fees with its standard error. **No
+  verdict is drawn from it**: two hours hold about 24 five-minute expiries and a handful of
+  trades at most.
+- **Standing rule for the trading verdict:** the same command is to be run again, once, when our
+  recording holds 30 trades of `measured_bars` on events after 09:00 UTC on 11-13. Supported if
+  P&L before fees is then at least two standard errors above zero and above the frozen rules' on
+  the same events. Until then the moved-forward price is confirmed or not as a better price, and
+  untested as a source of profit.

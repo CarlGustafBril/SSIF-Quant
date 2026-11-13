@@ -2,6 +2,7 @@
 
     python bars.py measure      # the measurements behind MEASURED, from our own recording and July
     python bars.py nowcast      # build the recorder's signal table with the moved-forward Chainlink price
+    python bars.py check        # the bars and the moved-forward price on seconds recorded after the measurement
 
 The frozen rules allow for the age of our reference price with a formula: spot x volatility x
 sqrt(age). The variant "measured_bars" (variants.py) replaces the formula with what the error was
@@ -36,6 +37,7 @@ from recorder import config
 from recorder.reader import fmt_ts, load
 
 CAL_END = int(pd.Timestamp("2026-11-13T09:00", tz="UTC").timestamp() * 1000)
+CHECK_END = int(pd.Timestamp("2026-11-13T11:00", tz="UTC").timestamp() * 1000)     # the test on new seconds, see HISTORY.md
 Z = votes.Z_LIMIT
 VOL_BINS = 5
 KINDS = ("naive", "nowcast", "standin_twap", "standin_spot", "binance", "gap")
@@ -185,6 +187,25 @@ def measure():
     return fitted
 
 
+def check(start=CAL_END, end=CHECK_END):
+    """The measured bars on seconds they were not measured on (specification in results/HISTORY.md)."""
+    d = recorder_errors(end)
+    d = d[d.ts >= start]
+    print(f"Our recording, {fmt_ts(d.ts.min())} to {fmt_ts(d.ts.max())} UTC: {len(d):,} seconds not used in the measurement. "
+          f"spot x volatility: median ${d.unit.median():.2f}.\n")
+    rows = []
+    for kind in ("naive", "nowcast", "binance"):
+        a, k = MEASURED[kind]
+        bar = np.hypot(a, k * d.unit)
+        rows.append({"kind": kind, "typical $": robust_sd(d[kind]), "rms $": rms(d[kind]), "bar $ on these seconds": bar_size(d[kind]),
+                     "measured bar $ (median)": float(bar.median()), f"beyond {Z} measured bars": float((d[kind].abs() > Z * bar).mean())})
+    table = pd.DataFrame(rows)
+    print(table.round(3).to_string(index=False))
+    naive, moved = table.set_index("kind")["bar $ on these seconds"][["naive", "nowcast"]]
+    print(f"\nMoved forward against last received: bar {1 - moved / naive:.0%} smaller, rms {1 - rms(d.nowcast) / rms(d.naive):.0%} smaller.")
+    return table
+
+
 # ============================================================================ the Chainlink price moved forward
 def moved_forward(chain, chain_src, binance, binance_ts, binance_then):
     """Chainlink's last price times Binance's move since that price was stamped.
@@ -239,6 +260,8 @@ def main():
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     if command == "measure":
         measure()
+    elif command == "check":
+        check()
     elif command == "nowcast":
         import evidence
         signals, _, _ = evidence.dataset("november")

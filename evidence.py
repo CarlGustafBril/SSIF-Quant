@@ -440,10 +440,18 @@ def report(name, with_variants):
 
 def only_variants(data, names):
     """Chosen variants on one dataset, without the rest of the report:  python evidence.py variants autumn baseline measured_bars"""
+    label = data
+    if data == "november-new":                  # our recording after the bars were measured, to the fixed end of that test
+        data = "november"
     signals, outcomes, windows = dataset(data)
+    if label == "november-new":
+        first_second = signals.groupby("expiry").ts.transform("min")
+        signals = signals[(first_second >= bars.CAL_END) & (signals.expiry <= bars.CHECK_END)].reset_index(drop=True)
+        print(f"{signals.expiry.nunique()} events from {fmt_ts(signals.ts.min())} to {fmt_ts(signals.expiry.max())} UTC")
     v = variant_table(signals, outcomes, windows, data, names)
+    v["data"] = label
     print(v.to_string(index=False))
-    path = os.path.join(variants.RESULTS_DIR, f"variants_{data}_{'_'.join(n for n in names if n != 'baseline')}.csv")
+    path = os.path.join(variants.RESULTS_DIR, f"variants_{label}_{'_'.join(n for n in names if n != 'baseline')}.csv")
     v.assign(run_utc=fmt_ts(now_ms()), code_version=variants.git_version()).to_csv(path, index=False)
     print(f"\nSaved to {path}")
 
