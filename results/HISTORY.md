@@ -450,3 +450,44 @@ few trades to say anything.
   differently in other months (nearly fixed in dollars there). If the tape's bars turn out
   mis-sized that is the first suspect, and it will be reported, not re-fitted on the test data.
   (3) Narrower bars on the 5m and 15m mean more signals there, not fewer; wider on the 1h mean fewer.
+
+### Outcome (run once, 09:20 to 09:41 UTC on 11-13, code `3ef2807`)
+
+`python evidence.py variants now baseline measured_bars empirical`, the same for `autumn`, then
+`python evidence.py tape-pooled baseline measured_bars empirical`. The frozen rules reproduced
+their earlier numbers on both periods (544 and 252 trades, +2.2 and +0.2 c).
+
+| Period | Variant | Beyond 2.5 bars | Spread (1.0 is right) | Trades | Before fees (se) | After fees and 0.9 c |
+|---|---|---|---|---|---|---|
+| 08-20 to 10-12 | frozen rules | 5.4% | 0.85 | 544 | +2.2 c (1.7) | -0.9 c |
+| | measured_bars | 7.9% | 1.09 | 766 | +3.1 c (1.5) | +0.0 c |
+| | empirical | 5.3% | 0.84 | 528 | +3.2 c (1.8) | +0.1 c |
+| 10-13 to 11-11 | frozen rules | 4.8% | 0.83 | 252 | +0.2 c (2.5) | -2.9 c |
+| | measured_bars | 7.1% | 1.07 | 400 | +0.9 c (2.1) | -2.2 c |
+| | empirical | 4.7% | 0.82 | 241 | +1.7 c (2.5) | -1.5 c |
+| **Both periods** | frozen rules | 5.2% | | 796 | **+1.6 c (1.4)** | -1.5 c (-4.3 to +1.2) |
+| | measured_bars | 7.6% | | 1,166 | **+2.4 c (1.2)** | -0.7 c (-3.1 to +1.7) |
+| | empirical | 5.1% | | 769 | **+2.7 c (1.4)** | -0.4 c (-3.3 to +2.4) |
+
+- **`measured_bars`, the bars: better sized, by the rule written down.** The spread went from 0.83
+  to 0.85 (bars about a sixth too wide) to 1.07 to 1.09 (about a twelfth too narrow) on both
+  periods. As limit (3) said, that means more seconds beyond 2.5 bars, not fewer: 7.6% against
+  5.2%, and 1,166 trades against 796.
+- **`measured_bars`, the profit: not supported.** +2.4 c before fees is 1.9 standard errors above
+  zero; the rule asked for two. It is higher than the frozen rules' +1.6 c, and the 438 expiries
+  only this variant trades made +2.5 c (se 2.0), so the added trades were no worse than the old
+  ones. After fees it is -0.7 c.
+- **`empirical`: no material difference, as expected.** +2.7 c against +1.6 c before fees (within
+  2 c) and 5.1% against 5.2% beyond 2.5 bars (within a point). It makes the identical trade on 588
+  of the 739 expiries both trade. Not "better": 1.9 standard errors above zero.
+- **What neither does:** reduce the share of seconds beyond 2.5 bars to the 1% that noise alone
+  would give. With bars of the right size it is 5 to 8%. The rest is contracts really disagreeing,
+  which is the thing being traded; the 30-second price move after a lasting signal is unchanged
+  (+1.4 to +1.6 c, standard errors 0.2 to 0.3, under all three).
+- **The aim "fewer trades on noise" was met on July and not on the tape.** On July the measured
+  bars cut the share beyond 2.5 bars from 8.5% to 4.5% and 6.1%, and the trades from 164 to 131.
+  On the tape the frozen bars had been too wide, so sizing them correctly added trades.
+- Not tested here, as stated beforehand: the Chainlink price moved forward with Binance. That
+  needs our own recording, which has 11 trades.
+- Nothing was re-fitted after the run. The two variants together were not run, because that
+  combination was not written down.

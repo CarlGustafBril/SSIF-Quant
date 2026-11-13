@@ -448,11 +448,28 @@ def only_variants(data, names):
     print(f"\nSaved to {path}")
 
 
+def tape_pooled(names):
+    """Chosen variants on both public-tape periods together (today's rule), from the trades their runs saved:
+    python evidence.py tape-pooled baseline measured_bars empirical"""
+    rows = []
+    for name in names:
+        parts = [pd.read_parquet(variant_trades_path(data, name)).dropna(subset=["pnl"]) for data in ("autumn", "now")]
+        t = pd.concat(parts)
+        n, mean, se = interval(t.pnl * 100)
+        _, net, net_se = interval((t.pnl_net - TAPE_FILL_OPTIMISM) * 100)
+        rows.append({"variant": name, "trades": n, "hit": (t.pnl > 0).mean(), "before fees c": mean, "se": se, "t": mean / se,
+                     "95% low": mean - 1.96 * se, "95% high": mean + 1.96 * se, "after fees and 0.9 c": net, "net se": net_se,
+                     "net 95% low": net - 1.96 * net_se, "net 95% high": net + 1.96 * net_se})
+    print(pd.DataFrame(rows).round(2).to_string(index=False))
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     name = args[0] if args else "summary"
     if name == "variants":
         return only_variants(args[1], args[2:])
+    if name == "tape-pooled":
+        return tape_pooled(args[1:])
     if name not in ("july", "holdout", "polls", "november", "now", "autumn", "summary"):
         sys.exit(__doc__)
     import io

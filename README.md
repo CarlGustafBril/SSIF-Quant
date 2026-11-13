@@ -7,7 +7,7 @@ markets and tests whether the prices disagree with each other by enough to trade
 
 Everything here is read-only market data. Nothing places orders, and nothing touches `trader.py`.
 
-## Status (2026-11-13, 00:30 UTC)
+## Status (2026-11-13, 09:45 UTC)
 
 **In one line:** contracts that expire together do disagree by more than noise, and the price does
 move toward our model afterwards, but under today's settlement rule the trade built on it does not
@@ -52,6 +52,14 @@ then the eight weeks back to the change of rule.
   price for 30 seconds (no taker fee; counted as filled only when the market trades through them)
   made -2.0 c per signal under today's rule (796 signals, 95% interval -4.7 to +0.8), specified
   before it was run (`maker.py`). The orders fill mostly when the signal was wrong.
+
+- **Error bars and the distribution were checked and do not change the answer (2026-11-13).** The
+  error bar of a vote is almost entirely the allowance for the age of the reference price. With
+  that allowance measured instead of assumed (`bars.py`), the bars are better sized and the trade
+  makes +2.4 c before fees under today's rule (1,166 trades, se 1.2) against +1.6 c; with an
+  empirical return distribution instead of the Student-t (`empirical.py`) it makes +2.7 c (769
+  trades, se 1.4). Both were specified before being run. After fees all three are below zero.
+  Why a Student-t was chosen, with the evidence, is in `FINDINGS.md`, Phase 5.
 
 - **Other coins (ETH, SOL, XRP): untested, not rejected.** The same rules look profitable there on
   quotes rebuilt from public trades (+5.2 c after fees, 519 trades), but that is an artefact: those
@@ -98,10 +106,13 @@ Run from this folder with the project's Python (`C:\polydata\venv\Scripts\python
 | `python july.py build` | Rebuilds the July signal tables from the shared dataset (needs the two steps under "Shared dataset" first) | 3 min |
 | `python scripts/fetch_july_reference.py` | Official July lines and outcomes (Polymarket) and Binance 1-second candles, into `C:\polydata\reference` | 5 min |
 | `python assets.py pooled` | The same rules on ETH, SOL and XRP (after `tape.py fetch` and `build` with `POLY_ASSET` set), at rebuilt quotes and at real traded prices | 1 min |
+| `python bars.py measure` | The error of each kind of reference price, measured on our recording and July (the numbers behind the `measured_bars` variant) | 1 min |
+| `python empirical.py compare` | The empirical return distribution against the fitted Student-t (`empirical.py build` rewrites `empirical.json`) | 10 s |
+| `python evidence.py variants <data> <variant> ...`, then `python evidence.py tape-pooled <variant> ...` | Chosen variants on one dataset; then both public-tape periods together | 10 to 60 min |
 | `python maker.py` | The frozen signals executed with resting orders instead of taking (specification in `results/HISTORY.md`) | 2 min |
 | `python tape.py validate` / `check` | The trade-built quotes against the recorded book: on July, and on our own recording under today's rule | 3 min |
 | `python tape.py fetch <first day> <last day>`, then `python tape.py build now` | Public lines, candles and trades for a period, and its signal table (periods are named in `tape.PERIODS`) | 40 s per day |
-| `python -m unittest discover tests` | 51 tests | 2 s |
+| `python -m unittest discover tests` | 67 tests | 2 s |
 | `python -m recorder.acceptance <start> <end>` | Recorder report for a UTC window | seconds per hour |
 
 Reports are saved in `C:\polydata\reports`. Plots are in `C:\polydata\analysis` as SVG files that
@@ -143,6 +154,8 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
 | `july.py` | The same rules on the teammate's July recording (tick extracts and 3-second polls) |
 | `evidence.py` | The signal tests and the pooled summary across datasets |
 | `assets.py` | The same rules on other coins, with the check of fills against real trades |
+| `bars.py` | Measured error bars for the reference price, and the Chainlink price moved forward with Binance |
+| `empirical.py` | Empirical return distribution as an alternative to the Student-t |
 | `maker.py` | Resting-order execution of the same signals, fills simulated from public trades |
 | `tape.py` | The same rules on Polymarket's public trade tape, with quotes rebuilt from trades (today's settlement rule) |
 | `scripts/` | `pull_shared.py` (mirror the shared dataset), `fetch_july_reference.py` (public reference data for July) |

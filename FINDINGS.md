@@ -743,3 +743,116 @@ from the public trade tape, after the test was written down and committed (`8eeb
 - **So the other coins are untested, not rejected.** Thin markets are where a mispricing could
   survive, and also where this instrument fails. Their order books would have to be recorded. Our
   recorder can do that with a configuration change; it has not been changed.
+
+## Phase 5: what the error bars are made of, measured bars, and the choice of distribution (2026-11-13, 08:30 to 09:45 UTC)
+
+A teammate asked three things after reading Phase 4: can the error bars be made smaller so that
+fewer trades are taken on noise, in particular through the volatility estimate in the staleness
+term; can the line (strike) be had from the API; and would empirical quantiles be better than the
+Student-t. Code: `bars.py`, `empirical.py`, variants `measured_bars` and `empirical` in
+`variants.py`. The frozen rules are unchanged. The measurements, the specification and the
+outcome are in `results/HISTORY.md` ("Two variants").
+
+### What an error bar is made of
+
+- **Almost all of it is the allowance for the age of the reference price**: 96% of the variance
+  for the 5m contract, 89% for the 15m, 74% for the 1h. The price tick is 3% of a vote. The line
+  adds nothing: it is exact (`eventMetadata.priceToBeat` on Polymarket's Gamma API, and our own
+  feeds reproduce it to the cent on all 95 windows compared; Phase 1).
+- **The bar matters most near the line.** With spot within $10 of the line the bar is larger than
+  the vote itself; beyond $100 it is 6%.
+- **Measured against the price each second really had, the reference price's error has fat
+  tails**: typically $2, root mean square $8 (our recording, 124,486 seconds). Most seconds
+  nothing happens; in a few the price jumps before our feed shows it.
+- **The frozen staleness formula was already the right size on our own recording** for what it is
+  used for ($7.6 against a measured $7.9 for "exceeded by 2.5 times on 1.2% of seconds"), and its
+  volatility estimate scales correctly: measured over formula is the same in calm and busy hours.
+  So the volatility estimate is not where the gain is.
+- **Where the gain is:** (1) moving the last Chainlink price forward by Binance's move since its
+  stamp cuts the error by a third ($5.3 against $7.9); (2) on the public tape the frozen bar for
+  the 5m and 15m was about 1.6 times too wide; (3) the hourly contract is a Binance contract next
+  to Chainlink contracts, the difference between the two feeds moves by about $6 over any horizon
+  from 30 seconds to 15 minutes, and the frozen rules allowed nothing for that.
+
+### Result of the two variants under today's rule
+
+Both were specified, with their verdict rules, before being run on the public tape, and run once.
+
+| Period | Variant | Beyond 2.5 bars | Spread (1.0 is right) | Trades | Before fees (se) | After fees and 0.9 c |
+|---|---|---|---|---|---|---|
+| 08-20 to 10-12 | frozen rules | 5.4% | 0.85 | 544 | +2.2 c (1.7) | -0.9 c |
+| | measured_bars | 7.9% | 1.09 | 766 | +3.1 c (1.5) | +0.0 c |
+| | empirical | 5.3% | 0.84 | 528 | +3.2 c (1.8) | +0.1 c |
+| 10-13 to 11-11 | frozen rules | 4.8% | 0.83 | 252 | +0.2 c (2.5) | -2.9 c |
+| | measured_bars | 7.1% | 1.07 | 400 | +0.9 c (2.1) | -2.2 c |
+| | empirical | 4.7% | 0.82 | 241 | +1.7 c (2.5) | -1.5 c |
+| **Both periods** | frozen rules | 5.2% | | 796 | **+1.6 c (1.4)** | -1.5 c (-4.3 to +1.2) |
+| | measured_bars | 7.6% | | 1,166 | **+2.4 c (1.2)** | -0.7 c (-3.1 to +1.7) |
+| | empirical | 5.1% | | 769 | **+2.7 c (1.4)** | -0.4 c (-3.3 to +2.4) |
+
+- **Measured bars are better sized and do not change the conclusion.** The spread moves from 0.84
+  to 1.08. More seconds count as signals, not fewer, because on the tape the frozen bars were too
+  wide: 1,166 trades instead of 796, at +2.4 c before fees (1.9 standard errors above zero, short
+  of the two the test required) and -0.7 c after fees.
+- **Empirical quantiles make no material difference**: +2.7 c against +1.6 c before fees, the
+  same share of seconds beyond 2.5 bars, and the identical trade on four expiries in five.
+- **All three versions agree on the size of the thing:** +1.6 to +2.7 c per trade before fees
+  under today's rule, each within two standard errors of zero, each below the 2.2 c fee plus the
+  0.9 c the tape flatters fills by.
+- **On July (the data the bars were measured on, so not a test)** the measured bars halved the
+  share of seconds beyond 2.5 bars on the first delivery (8.5% to 4.5%), cut the trades from 164
+  to 131 and left profit per trade at +10.3 c against +8.5 c.
+- **Even with bars of the right size, contracts disagree beyond 2.5 bars on 5 to 8% of seconds**
+  where noise alone would give about 1%. The excess is real disagreement between contracts. It is
+  what the strategy trades, and under today's rule it is worth 1 to 3 c, not the 7 c the model sees.
+- **Still untested:** the moved-forward Chainlink price in trading terms. Only our own recording
+  has the feed for it, and it holds 11 trades. This is the one reason left to keep recording.
+
+### Why a Student-t, and how the alternatives compare
+
+The model needs the shape of the BTC return over the time left, in units of recent realised
+volatility. The sample is 90 days of Binance 1-minute closes (to 2026-11-11): the return over
+every 5, 15 and 60-minute window divided by the realised volatility of the hour before
+(25,907, 8,635 and 2,158 windows). `python empirical.py compare` and `fit_nu.py` reproduce this.
+
+| | 5 min | 15 min | 60 min |
+|---|---|---|---|
+| Fitted nu | 3.95 | 3.61 | 3.03 |
+| Returns beyond 4 standard deviations: seen | 133 | 41 | 16 |
+| ... expected under a normal | 1.6 | 0.5 | 0.1 |
+| ... expected under the fitted t | 126 | 42 | 13 |
+| Largest gap between sample and model, cumulative share: normal | 0.054 | 0.074 | 0.090 |
+| ... Student-t | 0.016 | 0.013 | 0.013 |
+| ... what sampling noise alone allows (95%) | 0.008 | 0.015 | 0.029 |
+| nu fitted on each half of the 90 days | 3.87, 4.05 | 3.67, 3.56 | 3.10, 2.97 |
+| Largest price difference, t against empirical, for a second contract given the first | 1.5 c | 1.4 c | 0.8 c |
+
+1. **The tails are far too fat for a normal.** Moves beyond four standard deviations happen about
+   a hundred times more often than a normal allows, and a contract far from its line is priced on
+   exactly those moves. The t gets their number right at all three horizons.
+2. **The t fits within sampling noise** at 15 and 60 minutes and at twice it at 5 minutes. The
+   normal misses by three to seven times as much as the t.
+3. **One number per horizon, and it is stable**: fitted separately on each half of the sample it
+   moves by 0.1 to 0.2.
+4. **It has a smooth inverse and density everywhere.** The model turns a price into a width
+   through the inverse, and a price tick into an error bar through the density. An empirical
+   distribution has 43 observations beyond the 2% point on each side at 60 minutes, so those are
+   noisy exactly where contracts far from the line are priced.
+5. **Only the shape matters, not the scale**, because the width is fitted to each contract's own
+   price. Given one contract's price, the t and the empirical distribution price a second
+   contract within 1.5 c of each other anywhere between 2 and 98 cents. The edge threshold is 4.5 c.
+6. **Tested, not only argued:** the frozen rules with the empirical distribution in place of the t
+   give the same trade on four expiries in five and no material difference in profit or in the
+   share of signals, on July and on 12 weeks of today's rule (table above).
+
+What the t gets wrong, for the record:
+
+- **It is symmetric and the sample is not quite**: skew -0.1, -1.0 and -1.2 at 5, 15 and 60
+  minutes (a few large falls). Up and down are equally frequent (49.5% up), so the centre is right.
+- **Near the line at 5 minutes** the sample has more very small returns than the t: the quantile
+  that prices a 45-cent contract is 0.18 of the 30-cent one, against 0.24 for the t.
+- **At 60 minutes nu is 3.0**, close to where the variance of a t stops being usable. The frozen
+  rules turn realised volatility into a width through that variance (a factor 0.58 to 0.70),
+  while the fitted scale of the t is 0.74 to 0.80. So the realised-vol vote is 13 to 22% too low.
+  It is used only when three contracts vote (146 of 1,166 trades), and it is not changed here. The
+  empirical variant does not have this problem, because its unit is realised volatility itself.
