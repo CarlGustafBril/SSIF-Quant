@@ -139,3 +139,17 @@ does not by itself mean lost data. The daily check counts seconds that are truly
 | `health.py` | Counts, gaps, NTP offset, sleep detection |
 | `store.py` | Table schemas and the Parquet writer |
 | `reader.py`, `acceptance.py` | Reading data back; the acceptance report |
+
+## Recording ETH as well (ready, not started)
+
+The same contracts exist for ETH. `POLY_ASSET=eth` makes the recorder a second, separate copy: its
+own data folder (`C:\polydata_eth`), its own lock, its own task. With the variable unset everything
+is as before, so the BTC recorder is not affected by this.
+
+- Start it and keep it running across reboots: `.\recorder\windows\install_task_eth.ps1`
+- Remove it: `Unregister-ScheduledTask -TaskName PolyRecorder_eth -Confirm:$false`
+- A two-minute trial on 2026-11-13 recorded all three contract lengths, both Chainlink streams
+  (`eth/usd`) and Binance `ethusdt`, about 650 book rows a second (roughly a third of BTC, so
+  about 1.5 GB a day).
+- Analysis reads whichever folder `POLY_ASSET` points at: `set POLY_ASSET=eth` and then
+  `python backtest.py`, `python daily_check.py` and so on work on the ETH recording.

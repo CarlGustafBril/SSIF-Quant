@@ -106,7 +106,7 @@ class Discovery:
             step = config.LENGTHS[length]
             current = int(now // step) * step
             for start in (current, current + step, current + 2 * step):
-                slug = f"btc-updown-{length}-{start}"
+                slug = f"{config.ASSET}-updown-{length}-{start}"
                 if slug not in self.markets:
                     events = await asyncio.to_thread(get_json, "/events", {"slug": slug})
                     self.health.count("gamma", now_ms())

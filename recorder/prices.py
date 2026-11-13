@@ -9,7 +9,7 @@ from . import config
 from .store import now_ms
 from .wsloop import run_ws
 
-SYMBOL = "btc/usd"
+SYMBOL = config.CHAINLINK_SYMBOL
 LIVE_TOPICS = {"crypto_prices_twap_sixty": "twap60", "crypto_prices_chainlink": "spot"}
 # a snapshot of the spot topic comes back labelled "crypto_prices"
 SNAPSHOT_TOPICS = {"crypto_prices_twap_sixty": "twap60", "crypto_prices": "spot", "crypto_prices_chainlink": "spot"}
@@ -143,6 +143,6 @@ class Binance:
     @staticmethod
     def _fetch(start_ms):
         r = requests.get(config.BINANCE_REST, timeout=10,
-                         params={"symbol": "BTCUSDT", "interval": "1s", "startTime": start_ms, "limit": 1000})
+                         params={"symbol": config.BINANCE_PAIR.upper(), "interval": "1s", "startTime": start_ms, "limit": 1000})
         r.raise_for_status()
         return r.json()
