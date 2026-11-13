@@ -543,6 +543,9 @@ price. As it stands this is a small strategy.
 
 ### What this does and does not show
 
+*Written before Phase 4. The "not shown" point, the proposed test and the open questions below were
+answered there: under today's rule the trade does not cover the fee.*
+
 - **Shown, on July data:** contracts that expire together disagree by more than noise often enough
   to trade, the disagreement predicts the outcome, and the frozen rules earned about 6 cents per
   trade after fees on tick-level data, twice.
@@ -564,3 +567,129 @@ price. As it stands this is a small strategy.
 2. When exactly did the settlement rule change from the spot price to the 60-second average? It
    matters for how much weight July can carry.
 3. Is the proposed stop/confirm rule above acceptable to the team?
+
+
+## Phase 4: today's settlement rule, from the public trade tape (2026-11-12 22:30 to 11-13 00:30 UTC)
+
+Phase 3 left one question open: does the July result hold now that the 5m and 15m contracts settle
+on a 60-second average? Our own recording under that rule was a day old (six trades). This phase
+answers it with twelve weeks of public data. Code: `tape.py`, `evidence.py`.
+
+### When the rule changed
+
+The rules text of the 15m contract names the Chainlink spot stream on 2026-08-05 and the 60-second
+average stream on 2026-08-20 (Gamma API, one contract per date checked). Everything from 08-20 on
+is today's rule; contracts are also filtered on their own rules text.
+
+### The instrument: quotes rebuilt from trades
+
+Polymarket publishes every trade of every contract (`data-api.polymarket.com/v2/trades`, no key):
+price, side, token, second. A taker buying Up paid the ask; a taker selling Up, or buying Down at
+1 - price, hit the bid. The best bid and ask at each second are taken from the last trade on each
+side, at most 15 s old (details at the top of `tape.py`). Three checks, in the order they were made:
+
+1. **July, where book and trades both exist (1,056 expiries, `python tape.py validate`).** The
+   rebuilt mid has a median error of 0 and a typical size of 0 to 0.25 c (95th percentile 2 to 3 c).
+   The frozen rules on rebuilt quotes take 132 trades, 124 of them on expiries the book version
+   also traded, for +11.0 c before fees against the book version's +8.5 c. The same 132 trades paid
+   for at the real book make +10.1 c, so the rebuilt quotes flatter fills by 0.9 c per trade. That
+   0.9 c is taken off every "after fees" figure from the tape.
+2. **Time stamps (`python tape.py check`).** The July trades carry the exchange's match time. The
+   public tape's stamp turned out to be about 4 s later: against our own recorded book the rebuilt
+   5m mid is off by 3.9 c on average with the stamps as given and by 1.5 c with them moved 4 s
+   earlier (15m: 2.2 and 1.1 c). This was found after the first test had been run with the stamps as
+   given. Both versions of that test are reported in `results/HISTORY.md`; the verdict is the same.
+   The 4 s was chosen from the comparison with the book only.
+3. **Against our recorder under today's rule (105 expiries).** Lines identical. Rebuilt mids
+   typically within 0.5 c of the book (95th percentile 4 to 5.5 c). The stand-in for Chainlink
+   (Binance minus the gap at the last 5-minute boundary, the gap now measured against Binance's own
+   60-second average) is off by $6.7 (robust $3.6), in line with Phase 3. Implied widths agree
+   (median ratio 1.00 to 1.01), and so do the ratios between contracts (15m to 5m: 1.04 in both).
+   But individual signals often differ: 305 seconds flagged by both, 667 by the recorder only, 170
+   by the tape only, and only 3 of each version's 6 trades fall on the same expiry. A signal sits at
+   the edge of what a $5 error in the reference price allows, so two feeds with different errors
+   flag different seconds. The tape result is therefore the result of these rules for a trader
+   with a Binance-based estimate of Chainlink, not a replay of our recorder.
+
+### Result
+
+| Data (today's rule) | Expiries | Trades | Won | Before fees | After fees and the 0.9 c | Price move after 30 s |
+|---|---|---|---|---|---|---|
+| Tape, 10-13 to 11-11 (first test) | 2,869 | 252 | 53% | +0.2 c (se 2.5) | -2.9 c (-7.9 to +2.0) | +1.5 c (se 0.3) vs 7.1 c edge |
+| Tape, 08-20 to 10-12 (second test) | 5,140 | 544 | 55% | +2.2 c (se 1.7) | -0.9 c (-4.3 to +2.5) | +1.4 c (se 0.2) vs 6.5 c edge |
+| Our recorder, from 11-11 | 111 | 6 | 17% | -40.7 c (se 15.9) | -42.8 c | +0.8 c (se 1.0) |
+| **All of today's rule** | 8,120 | 802 | 54% | **+1.2 c (se 1.4)** | **-1.9 c (-4.6 to +0.9)** | |
+
+- **The trade does not pay under today's rule.** Before fees it is indistinguishable from zero;
+  after fees it loses about 2 cents, with the whole 95% interval below +1 c. The first test met
+  the condition written down beforehand for "not worth trading as it stands"; the second, twice as
+  large and also fixed beforehand, agrees.
+- **The signal itself is still there.** After a lasting signal the price moves 1.4 to 1.5 c toward
+  the model in 30 seconds, eight and five standard errors from zero, on 3,900 signals. July gave
+  1.7 to 2.1 c. So the disagreement between contracts does predict the next price move under both
+  rules. It predicts about a fifth of the edge the model sees. A round trip at bid and ask over
+  those 30 seconds loses 0.7 to 0.9 c before fees.
+- **No dose-response any more.** In July a larger edge at entry meant a larger profit (0.61 c per
+  cent of edge). Under today's rule the four edge buckets make -2.3, +3.7, -2.0 and +4.6 c.
+- **By month, before fees:** August (from the 20th) -9.0 c (77 trades), September +4.8 c (310),
+  October +1.1 c (305), November +1.3 c (104).
+- **By pair, before fees:** 5m with 15m +2.0 c (326 trades), a pair with the 1h +0.7 c (476).
+  Buying the range +4.7 c (376), selling it -1.8 c (426). The buy/sell gap was not there in July
+  and is not acted on.
+
+### The two candidate rules
+
+Both were defined before the second July delivery and judged on data fixed beforehand.
+
+| Rule set | July tick, both deliveries (old rule) | Today's rule, first test | Today's rule, second test | All of today's rule, after fees |
+|---|---|---|---|---|
+| baseline | 164 trades, +8.5 c | 252, +0.2 c | 544, +2.2 c | -1.5 c (-4.3 to +1.2) |
+| `same_feed` (5m and 15m only) | 96 trades, +8.7 c | 106, +7.4 c | 216, +1.0 c | -0.0 c (-4.3 to +4.2) |
+| `edge_8` (8 c minimum edge) | 111 trades, +12.3 c | 180, +0.2 c | not judged | first test: -3.1 c (-9.0 to +2.9) |
+
+Figures are before fees unless marked. `same_feed` looked like the answer after the first
+today's-rule test (three samples, +8.0 c pooled, t = 2.9). It was given its own test on the eight
+weeks it had not seen, with rejection defined as a negative result after fees there, and it made
+-2.1 c. This is the value of fixing the test first: the three favourable samples were partly luck.
+
+### Why July and today differ
+
+Not established. The candidates, none of them tested:
+
+- **The rule itself.** A 60-second average at both ends removes most of the last-minute jump risk
+  that the old rule had, and it is the last minutes where the contracts disagreed most.
+- **The market got more efficient.** Signals occur on 5.1 to 5.9% of seconds now against 9.1% in
+  July, and the model's edge at a signal is 6.5 to 7.1 c against 7.2 to 7.9 c.
+- **July was partly luck.** +8.5 c with a standard error of 3.1 is 2.7 standard errors from zero
+  but only about 2.1 from the +1.2 c measured under today's rule (standard error of the difference
+  3.4 c).
+- **The instruments differ.** July is a recorded book, today's rule is rebuilt quotes. Check 1
+  above says the rebuilt quotes reproduce the July book result (they give a slightly higher one),
+  so this is the least likely explanation.
+
+### Conclusion
+
+1. The measurement works: contracts that expire together disagree by more than noise on about 5%
+   of seconds, and the price then moves toward the model. This holds on five separate samples.
+2. Under the old settlement rule the range trade made about 6 c per trade after fees on tick data.
+3. Under today's rule, on 8,120 expiries and 802 trades, it makes -1.9 c after fees (-4.6 to +0.9).
+   More data of the same kind will not turn that into a tradable edge.
+4. Two attempts to tune the rules were each tested once on unseen data and rejected.
+5. What has not been tested: providing liquidity instead of taking it (no taker fee, uncertain
+   fills), and other contract families. Those are new projects, not adjustments to this one.
+
+### Limits of this phase
+
+- Quotes under today's rule are rebuilt from trades, not recorded. They are checked against a
+  recorded book on July and on one day of our own recording, and the 0.9 c correction comes from July.
+- The Chainlink price is a stand-in throughout (Binance minus a gap known every 5 minutes). Our
+  recorder has the real feed; in a few weeks it can be used to confirm the tape result directly,
+  at about 6 trades a day.
+- Fills are one share per leg at the rebuilt best price, one second after the signal.
+
+### Open questions
+
+1. Is a liquidity-providing version worth a separate study? It would need the recorded book (our
+   recorder stores it) and a model of when resting orders get filled.
+2. Should the recorder keep running? It costs 4 to 5 GB a day. A few weeks of it would confirm
+   the tape result on the real feed; it is not needed for the conclusion above.

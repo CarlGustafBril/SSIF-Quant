@@ -202,3 +202,27 @@ The public tape goes back to the change of settlement rule. Those eight weeks ha
 - **Rejected:** negative on the new period, or the upper end of the 95% interval for all of
   today's rule below +3 c.
 - **Otherwise:** undecided.
+
+### Outcome of the test on 2026-08-20 to 2026-10-12 (5,140 expiries, run 00:15 UTC on 11-13)
+
+| Rule set | Trades | Won | Before fees | After fees and the 0.9 c | Price move after 30 s |
+|---|---|---|---|---|---|
+| same_feed | 216 | 42% | +1.0 c (se 2.6) | **-2.1 c (95% interval -7.1 to +3.0)** | +2.7 c (se 0.4) vs 7.1 c edge |
+| baseline (for the record) | 544 | 55% | +2.2 c (se 1.7) | -0.9 c (-4.3 to +2.5) | +1.4 c (se 0.2) vs 6.5 c edge |
+
+- **same_feed: rejected**, by the first of the two conditions written down (negative on the new
+  period). On all of today's rule together it is 322 trades, +3.1 c before fees (se 2.2), -0.0 c
+  after (-4.3 to +4.2). Its earlier +7.4 c on 10-13 to 11-11 was within noise of this.
+- **baseline on all of today's rule (both tape periods):** 796 trades, +1.6 c before fees (se 1.4),
+  -1.5 c after (-4.3 to +1.2). With our recorder's six trades: 802 trades, +1.2 c before, -1.9 c
+  after (-4.6 to +0.9). The verdict of the first test stands on three times the data.
+- By month, baseline before fees: August (from the 20th) -9.0 c on 77 trades, September +4.8 c on
+  310, October +1.1 c on 305, November +1.3 c on 104. Only September (se 2.4) is above the fee and
+  the 0.9 c, about 3 c together.
+- No dose-response under today's rule: trades with 2 to 4.5 c of edge at entry made -2.3 c, 4.5 to
+  8 c +3.7 c, 8 to 12 c -2.0 c, above 12 c +4.6 c (standard errors 2 to 3.6).
+
+**Where this leaves the rules.** v4 remains the rule of record and is not a profitable taker
+strategy under today's settlement rule. `same_feed` and `edge_8` were each proposed once, tested on
+data fixed beforehand, and rejected. No further variant has been tried on the today's-rule data, so
+that data has not been searched for a rule that happens to fit it.

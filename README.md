@@ -7,45 +7,59 @@ markets and tests whether the prices disagree with each other by enough to trade
 
 Everything here is read-only market data. Nothing places orders, and nothing touches `trader.py`.
 
-## Status (2026-11-12, 22:30 UTC)
+## Status (2026-11-13, 00:30 UTC)
 
-**In one line:** the signal made money on a teammate's July recording, and did so again on a part
-of it we had not looked at, but July had a different settlement rule; under today's rule we have
-six trades, five of them losers. It is a research result with a defined test, not yet a strategy to fund.
+**In one line:** contracts that expire together do disagree by more than noise, and the price does
+move toward our model afterwards, but under today's settlement rule the trade built on it does not
+cover the exchange's fee. The signal is real as a measurement and not a strategy to fund as it stands.
 
-| Data | Shared expiries | Trades | Won | P&L per trade before fees | After fees |
+| Data | Settlement rule | Shared expiries | Trades | Per trade before fees | After fees |
 |---|---|---|---|---|---|
-| July tick recording, first delivery (07-11 to 07-18) | 681 | 106 | 67% | +8.4 c (se 3.7) | +6.2 c |
-| July tick recording, second delivery (07-18 to 07-22), expectations written down first | 375 | 58 | 60% | +8.6 c (se 5.7) | +6.4 c |
-| **Both tick deliveries** | 1,056 | 164 | 65% | **+8.5 c (se 3.1)** | **+6.3 c (95% interval +0.2 to +12.3)** |
-| July 3-second polls, expiries with no tick data (coarser) | 940 | 63 | 65% | +1.0 c (se 6.0) | -1.1 c |
-| Our own recording since 11-11 (today's settlement rule) | 104 | 6 | 17% | -40.7 c (se 15.9) | -42.8 c |
-| Everything | 2,100 | 233 | | +5.2 c (se 2.8) | +3.0 c (95% interval -2.4 to +8.5) |
+| Teammate's July tick recording (two deliveries) | old (spot price) | 1,056 | 164 | +8.5 c (se 3.1) | +6.3 c (+0.2 to +12.3) |
+| Teammate's July 3-second polls, other expiries | old | 940 | 63 | +1.0 c (se 6.0) | -1.1 c |
+| Public trade tape, 08-20 to 10-12 | **today's (60-second average)** | 5,140 | 544 | +2.2 c (se 1.7) | -0.9 c (-4.3 to +2.5) |
+| Public trade tape, 10-13 to 11-11 | **today's** | 2,869 | 252 | +0.2 c (se 2.5) | -2.9 c (-7.9 to +2.0) |
+| Our own recording since 11-11 | **today's** | 111 | 6 | -40.7 c (se 15.9) | -42.8 c |
+| **All of today's rule** | | 8,120 | 802 | **+1.2 c (se 1.4)** | **-1.9 c (95% interval -4.6 to +0.9)** |
 
 All rows use the rules frozen on 2026-11-12 11:00 UTC, unchanged: one range trade per expiry, 4.5
-cents minimum edge, held to expiry. "se" is the standard error; a result is usually called
-established when it is more than two standard errors from zero.
+cents minimum edge, held to expiry. "se" is the standard error. The fee is the exchange's taker fee,
+0.07 x p x (1 - p) per share and fill, about 2.2 cents for the two legs.
 
-- **For the signal:** on tick-level July data the profit is 2.7 standard errors from zero before
-  fees and 2.0 after. The second delivery repeated the first almost exactly. Trades with a larger
-  edge at entry earned more (0.61 cents per cent of edge, se 0.24). After a lasting signal the
-  price moved 1.7 to 2.1 cents toward the model within 30 seconds (se 0.4 to 0.5).
-- **Against it:** (1) In July the 5m and 15m contracts settled on a spot price; since then they
-  settle on a 60-second average, and our six trades under that rule lost. Six trades prove nothing
-  either way, but there is no evidence yet for the market as it is today. (2) The fee, 0.07 x p x
-  (1 - p) per share and fill, takes 2.2 of the 8.5 cents. (3) On the coarser poll data the result is
-  about zero. (4) Size is small: a median of 53 shares was on offer at the fill, so the July result
-  is about $400 to $1,600 in 11 days. (5) Prices do not converge quickly (selling back after 30
-  seconds loses), so the profit comes only from holding to expiry, which is why it is so noisy.
-- **What is needed:** about 290 trades under today's rule to tell a 5-cent edge after fees from
-  zero. Our recorder gives roughly 6 a day, so about 7 weeks; fewer if the edge is larger.
+**How this was established.** Each test after the first was fixed in writing and committed before
+its data was fetched (`results/HISTORY.md`): the second July delivery, then 30 days of today's rule,
+then the eight weeks back to the change of rule.
+
+- **Old rule (July): the trade worked.** +8.5 c per trade before fees on tick data, 2.7 standard
+  errors from zero, and the second delivery repeated the first (+8.6 c against +8.4 c).
+- **The rule changed between 5 and 20 August 2026.** The 5m and 15m contracts now settle on a
+  60-second average. Our own recording is one day old, so today's rule was tested on Polymarket's
+  public trade tape, with best bid and ask rebuilt from the last trades on each side (`tape.py`).
+  On July, where both exist, the rebuilt quotes give the same trades as the recorded book.
+- **Today's rule: no profit after fees.** 802 trades over 12 weeks: +1.2 c before fees, -1.9 c
+  after. The first test said "not worth trading as it stands" by the rule written beforehand (upper
+  end of the interval below +3 c), and the second, larger one agreed.
+- **The tuning that was tried failed its own test.** Trading only the 5m and 15m pair (`same_feed`)
+  looked good on three samples (+7.9, +10.4, +7.4 c before fees). On the eight weeks it had not
+  seen it made +1.0 c before fees and -2.1 c after (216 trades), which rejects it. A higher edge
+  threshold (`edge_8`) did no better than the baseline under today's rule.
+- **What does hold under both rules:** after a signal that lasts 3 seconds the price moves 1.4 to
+  2.1 cents toward the model within 30 seconds (standard errors 0.2 to 0.5, about 4,700 signals).
+  That is a fifth of the edge the model sees, and less than the spread and fee it costs to trade.
+- **Size is small in any case:** a median of 53 shares at the best price at the fill in July.
+
+**What would have to change for this to be worth more work:** trading without the taker fee
+(resting orders pay none, but then fills are not guaranteed and that is a different strategy,
+untested here), or a market where the fee is lower. More recording of the same thing will not
+change the answer: 802 trades already put the after-fee result between -4.6 and +0.9 cents.
+
 - **Recorder:** running since 2026-11-11 20:53 UTC as the Windows task `PolyRecorder`, writing to
   `C:\polydata`. Our recorded line matched the official one to the cent on every window checked.
-- **Rules:** still the ones frozen on 2026-11-12 11:00 UTC. Two alternatives are tracked alongside
-  (`same_feed`, `edge_8` in `variants.py`); neither replaces the baseline until our own data says so.
+- **Rules:** unchanged since the freeze. `same_feed` and `edge_8` stay in `variants.py` as tested
+  and rejected alternatives.
 
-Details, including everything that differs from the original brief, are in `FINDINGS.md`; every
-rule version and result in `results/HISTORY.md`.
+Details are in `FINDINGS.md` (Phase 3: July, Phase 4: today's rule); every rule version, test and
+result in `results/HISTORY.md`.
 
 ## The idea in five lines
 
@@ -68,10 +82,12 @@ Run from this folder with the project's Python (`C:\polydata\venv\Scripts\python
 | `python variants.py` | The frozen rules and alternatives side by side, on all data and on data after the freeze; every run logged to `results/` | about 5 min |
 | `python simulation_check.py` | Simulated markets with a known mispricing: is it found, and is nothing traded when prices are fair? | 2 min |
 | `python evidence.py summary` | The table above: the frozen rules on every dataset, pooled, with fees, size and the sample still needed | 1 min |
-| `python evidence.py july` (or `holdout`, `polls`, `november`) | Threshold-free tests on one dataset: does the other contract's width predict the outcome or the next price move? Add `--variants` for every rule variant | 1 to 10 min |
+| `python evidence.py july` (or `holdout`, `polls`, `november`, `now`, `autumn`) | Threshold-free tests on one dataset: does the other contract's width predict the outcome or the next price move? Add `--variants` for every rule variant | 1 to 10 min |
 | `python july.py build` | Rebuilds the July signal tables from the shared dataset (needs the two steps under "Shared dataset" first) | 3 min |
 | `python scripts/fetch_july_reference.py` | Official July lines and outcomes (Polymarket) and Binance 1-second candles, into `C:\polydata\reference` | 5 min |
-| `python -m unittest discover tests` | 43 tests | 2 s |
+| `python tape.py validate` / `check` | The trade-built quotes against the recorded book: on July, and on our own recording under today's rule | 3 min |
+| `python tape.py fetch <first day> <last day>`, then `python tape.py build now` | Public lines, candles and trades for a period, and its signal table (periods are named in `tape.PERIODS`) | 40 s per day |
+| `python -m unittest discover tests` | 51 tests | 2 s |
 | `python -m recorder.acceptance <start> <end>` | Recorder report for a UTC window | seconds per hour |
 
 Reports are saved in `C:\polydata\reports`. Plots are in `C:\polydata\analysis` as SVG files that
@@ -112,6 +128,7 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
 | `simulation_check.py` | The same engine on simulated markets where the truth is known |
 | `july.py` | The same rules on the teammate's July recording (tick extracts and 3-second polls) |
 | `evidence.py` | The signal tests and the pooled summary across datasets |
+| `tape.py` | The same rules on Polymarket's public trade tape, with quotes rebuilt from trades (today's settlement rule) |
 | `scripts/` | `pull_shared.py` (mirror the shared dataset), `fetch_july_reference.py` (public reference data for July) |
 | `svgplot.py` | Small plot writer (SVG), so no plotting library is needed |
 | `tests/` | Unit tests, including the brief's worked example |
@@ -121,6 +138,8 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
 
 - The taker fee is included (`pnl_net`); size limits and our own price impact are not. Every
   trade is one share per leg at the best price.
+- Under today's rule the long test uses quotes rebuilt from public trades, checked against recorded
+  books but not a recording itself (`tape.py`, `FINDINGS.md` Phase 4).
 - The July test stands in for the missing Chainlink feed with Binance minus the gap known at each
   5-minute boundary, and July's settlement rule differs from today's (`july.py`, `FINDINGS.md`).
 - Our Chainlink price arrives about 1.5 seconds after its timestamp, and the market reacts to
