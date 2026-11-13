@@ -38,6 +38,29 @@ NU_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nu.json")
 
 
 # ============================================================================ maths
+# The shape of the return distribution. In the frozen rules `nu` is a number and the shape is a
+# Student-t. A variant may pass an object in its place (empirical.Shape) with the same four
+# operations; these helpers send each call to the right one, and change nothing for a number.
+def shape_isf(p, nu):
+    return float(nu.isf(p)) if hasattr(nu, "isf") else float(stats.t.isf(p, nu))
+
+
+def shape_sf(x, nu):
+    return float(nu.sf(x)) if hasattr(nu, "isf") else float(stats.t.sf(x, nu))
+
+
+def shape_quote_err(mid, q, tick, nu):
+    """Error of q from a price known to half a tick."""
+    return float(nu.quote_err(mid, tick)) if hasattr(nu, "isf") else 0.5 * tick / float(stats.t.pdf(q, nu))
+
+
+def shape_sd_factor(nu):
+    """Width that matches a standard deviation of 1, or None when the shape has no usable one."""
+    if hasattr(nu, "isf"):
+        return float(nu.sd_factor)
+    return math.sqrt((nu - 2) / nu) if nu > 2 else None
+
+
 def load_nu():
     """{horizon in minutes: nu} as saved by fit_nu.py."""
     with open(NU_FILE) as f:
@@ -82,11 +105,11 @@ def leg_vote(leg, nu):
     if te <= 0:
         return None
     x = math.log(leg["line"] / leg["spot"])
-    q = float(stats.t.isf(mid, nu))
+    q = shape_isf(mid, nu)
     if q == 0 or x / q <= 0:          # price on the wrong side of 0.5 for where spot is: no width fits
         return None
     c = x / q
-    sigma_q = math.hypot(0.5 * leg["tick"] / float(stats.t.pdf(q, nu)), leg["line_err"] / leg["line"] / c)
+    sigma_q = math.hypot(shape_quote_err(mid, q, leg["tick"], nu), leg["line_err"] / leg["line"] / c)
     sigma = c * sigma_q / abs(q)
     return dict(leg, mid=mid, x=x, q=q, c=c, sigma=sigma, te=te, v=c / math.sqrt(te), sv=sigma / math.sqrt(te))
 
@@ -97,9 +120,10 @@ def anchor_vote(sd, nu):
     A Student-t with nu degrees of freedom and scale c has standard deviation c * sqrt(nu / (nu - 2)),
     so the width matching sd is sd * sqrt((nu - 2) / nu).
     """
-    if not (sd > 0) or nu <= 2:
+    factor = shape_sd_factor(nu)
+    if not (sd > 0) or factor is None:
         return None
-    v = sd * math.sqrt((nu - 2) / nu)
+    v = sd * factor
     return {"name": "anchor", "v": v, "sv": ANCHOR_ERR * v}
 
 
@@ -138,7 +162,7 @@ def model_prob(vote, v, nu):
     A vote may carry a "scale" (variants.py, bias correction): its v is then in common units and
     the leg's own width is v * scale. Without one the scale is 1, as in the frozen rules.
     """
-    return float(stats.t.sf(vote["x"] / (v * vote.get("scale", 1.0) * math.sqrt(vote["te"])), nu))
+    return shape_sf(vote["x"] / (v * vote.get("scale", 1.0) * math.sqrt(vote["te"])), nu)
 
 
 def range_edges(lo, hi, v, nu):

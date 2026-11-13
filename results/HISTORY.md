@@ -337,3 +337,116 @@ window's volume, line and trade count. `assets.py`; `tape.py` with `POLY_ASSET` 
   coin's result unreliable.
 - **Verdict: the public trade tape cannot test these coins.** Nothing is shown for or against the
   rules there. Recording their order books, as we do for BTC, is the only way to find out.
+
+## Two variants: measured error bars, and an empirical distribution (2026-11-13, from 08:30 UTC)
+
+Asked for by a teammate after reading the results: make the error bars smaller where they can be,
+so fewer trades are taken on noise, and try empirical quantiles in place of the Student-t. The
+frozen rules are not changed. Both are new variants in `variants.py`, next to the frozen rules.
+
+### What was measured first (our recording to 11-13 09:00 UTC, and July; `python bars.py measure`)
+
+What an error bar of a contract's vote consists of, frozen rules, our recording 11-11 and 11-12:
+
+| Contract | Error bar, share of the vote (median) | From the price tick alone | From the age of the reference price alone | Share of the variance from the reference price |
+|---|---|---|---|---|
+| 5m | 28% | 3% | 27% | 96% |
+| 15m | 14% | 3% | 13% | 89% |
+| 1h | 6.5% | 3% | 5% | 74% |
+
+So the bar is almost entirely the allowance for the reference price. Its error was then measured
+per second against the price that second really had (124,486 seconds of our recording):
+
+| Reference price | Typical error | Root mean square | Bar that 1.2% of errors exceed by 2.5 times | Bar of the frozen formula |
+|---|---|---|---|---|
+| Last Chainlink price received (frozen rules, our recording) | $2.1 | $8.0 | $7.9 | $7.6 |
+| The same moved forward with Binance | $1.6 | $5.3 | $5.3 | |
+| Stand-in used on the public tape (Binance minus the gap at the last 5-minute boundary) | $2.8 | $4.3 | $4.2 | $10.7 |
+| Stand-in used on July, measured on July (3,282 boundaries) | $3.9 | $5.2 | $5.1 | $5.3 |
+| Last closed Binance second (hourly contract) | $0.02 | $6.1 | $6.4 | $5.4 (tape $7.6) |
+| Change of Binance minus Chainlink over 5 minutes | $3.7 | $6.5 | $5.9 | none |
+
+Bars are at median volatility (spot x volatility $5.36 per sqrt-second on our recording, $3.09 in July).
+
+- The errors have fat tails: the typical second is a quarter of the root mean square. A bar has
+  one job here (beyond 2.5 bars is a signal), so each bar is sized so that the measured error
+  exceeds 2.5 bars as often as a normal error would, 1.2% of seconds.
+- **On our own recording the frozen formula was already about right** ($7.6 against $7.9). The
+  volatility estimate in it scales correctly: the ratio is the same in calm and busy hours.
+- Moving the Chainlink price forward with Binance's move since its stamp cuts the bar by a third.
+- **On the public tape the frozen bar for the 5m and 15m was about 1.6 times too wide** ($10.7
+  against $6.8 once the rebuilt quote's extra second is counted in both; it was set from July's $5
+  error as an "age" of 3 s, and volatility is higher now). On July it was right.
+- The hourly contract's line and settlement are Binance prices; the others' are Chainlink prices.
+  The difference between the two moves by about $6 over any horizon from 30 s to 15 min, and the
+  frozen rules allow nothing for it.
+- Each error is described by a fixed part and a part that grows with volatility,
+  bar = sqrt(a^2 + (k x spot x volatility)^2), fitted through five volatility bins:
+
+| Kind | a ($) | k (sqrt-seconds) |
+|---|---|---|
+| nowcast (Chainlink moved forward; our recording) | 2.23 | 0.898 |
+| standin_twap (public tape) | 2.13 | 0.676 |
+| standin_spot (July) | 5.06 | 0.178 |
+| binance (hourly contract) | 3.15 | 1.029 |
+| gap (added to the hourly contract) | 2.97 | 0.964 |
+
+### The two variants
+
+- **`measured_bars`**: the staleness formula is replaced by the measured bar of the kind of
+  reference price the data holds. The hourly contract also gets the gap term. Quotes rebuilt from
+  trades keep their extra second of age (spot x volatility x sqrt(1 s)). On our own recording the
+  5m and 15m reference price is also moved forward with Binance. Everything else is the frozen rules.
+- **`empirical`**: the Student-t is replaced by the empirical distribution of the same sample nu
+  was fitted on (90 days of Binance 1-minute closes to 2026-11-11; return over each 5, 15 and
+  60-minute window divided by the realised volatility of the hour before), made symmetric, read
+  by interpolation between 261 stored quantiles (`empirical.py`, `empirical.json`). Its unit is
+  realised volatility, so the realised-vol vote needs no conversion. Everything else is the frozen rules.
+
+### On the data they were built on (not a test)
+
+Range trade, one per expiry, cents per share before fees. "Beyond 2.5" is the share of seconds on
+which two contracts' votes differ by more than 2.5 combined error bars (about 1% if the bars were
+right and nothing were mispriced); "spread" is the robust spread of that difference (1.0 is right).
+
+| Data | Variant | Beyond 2.5 | Spread | Trades | P&L before fees (se) |
+|---|---|---|---|---|---|
+| July tick, first delivery | frozen | 8.5% | 1.01 | 106 | +8.4 c (3.7) |
+| | measured_bars | 4.5% | 0.95 | 79 | +12.1 c (4.4) |
+| | empirical | 8.5% | 1.00 | 103 | +8.4 c (3.6) |
+| July tick, second delivery | frozen | 8.6% | 1.06 | 58 | +8.6 c (5.7) |
+| | measured_bars | 6.1% | 1.00 | 52 | +7.6 c (5.8) |
+| | empirical | 8.5% | 1.03 | 57 | +9.5 c (5.6) |
+| Our recording, 11-11 to 11-13 | frozen | 4.5% | 0.87 | 6 | -40.7 c (15.9) |
+| | measured_bars (with the price moved forward) | 5.3% | 0.97 | 11 | +4.4 c (17.2) |
+| | empirical | 4.3% | 0.87 | 6 | -39.5 c (15.4) |
+
+None of this counts as evidence: the bars were measured on this data, and our recording has too
+few trades to say anything.
+
+### Written down before either variant is run on the public tape
+
+- **Data:** the two tables already built from the public trade tape under today's settlement
+  rule, exactly as the frozen rules were run on them: 2026-08-20 to 10-12 (`autumn`) and
+  2026-10-13 to 11-11 (`now`). No bar and no quantile was measured on them. The frozen rules gave
+  +2.2 c (544 trades) and +0.2 c (252 trades) before fees there.
+- **Run:** once each, `python evidence.py variants autumn baseline measured_bars empirical` and the
+  same for `now`. The frozen rules run alongside as a check that they reproduce the earlier numbers.
+- **Reported for each variant, whatever comes out:** (a) the share of seconds beyond 2.5 bars and
+  the spread, against the frozen rules; (b) P&L per trade before fees with its standard error, for
+  each period and for both together; also after fees (the taker fee and the 0.9 c by which rebuilt
+  quotes flatter fills).
+- **Verdict on the bars:** better sized if the spread is closer to 1.0 than the frozen rules' on
+  both periods.
+- **Verdict on profit, `measured_bars`:** supported if, on both periods together, P&L before fees
+  is at least two standard errors above zero and higher than the frozen rules'. Otherwise not supported.
+- **Verdict, `empirical`:** expected to make no material difference, because the two shapes price
+  a second contract within 1.5 c of each other given the first. "No material difference" if its
+  P&L before fees on both periods together is within 2 c of the frozen rules' and its share beyond
+  2.5 bars within one percentage point. "Better" only on the same test as `measured_bars`.
+- **Known limits, stated now:** (1) the tape has no Chainlink feed, so moving the price forward
+  cannot be tested there; only the measured bars and the gap term are. (2) The tape's stand-in was
+  measured on 35 hours of our November recording; July shows the stand-in's error behaves
+  differently in other months (nearly fixed in dollars there). If the tape's bars turn out
+  mis-sized that is the first suspect, and it will be reported, not re-fitted on the test data.
+  (3) Narrower bars on the 5m and 15m mean more signals there, not fewer; wider on the 1h mean fewer.

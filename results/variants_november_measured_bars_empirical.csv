@@ -1,0 +1,10 @@
+data,variant,period,events,seconds_2plus_votes,signal_rate,lasting_signals,lasting_events,move30_c,move30_se_c,edge_seen_c,trades,trades_resolved,hit_rate,pnl_c_per_trade,pnl_ci_low_c,pnl_ci_high_c,net_c_per_trade,net_ci_low_c,net_ci_high_c,pnl_se_c,pair_seconds,pairs_beyond_limit,pair_z_spread,run_utc,code_version
+november,baseline,all,147,30101,0.0465,45,13,0.69,0.87,4.68,6,6,0.167,-40.65,-81.54,0.24,-42.75,-83.39,-2.1,15.91,31782,0.0448,0.867,2026-11-13 09:13:59,b161c09+uncommitted
+november,baseline,design,73,14540,0.0587,32,8,0.62,1.21,4.72,5,5,0.0,-53.18,-86.51,-19.85,-55.32,-87.93,-22.7,12.0,16093,0.0546,0.957,2026-11-13 09:13:59,b161c09+uncommitted
+november,baseline,confirm,74,15561,0.0351,13,5,0.86,0.56,4.57,1,1,1.0,22.0,,,20.1,,,,15689,0.0347,0.785,2026-11-13 09:13:59,b161c09+uncommitted
+november,measured_bars,all,147,30101,0.0557,55,23,-0.39,0.91,4.56,11,11,0.636,4.36,-33.84,42.57,2.44,-35.73,40.6,17.15,32098,0.0526,0.969,2026-11-13 09:13:59,b161c09+uncommitted
+november,measured_bars,design,73,14540,0.0623,25,11,-0.15,1.27,4.96,4,4,0.5,8.25,-113.05,129.55,6.22,-115.03,127.46,38.12,16205,0.0562,1.01,2026-11-13 09:13:59,b161c09+uncommitted
+november,measured_bars,confirm,74,15561,0.0495,30,12,-0.6,1.31,4.22,7,7,0.714,2.14,-43.81,48.1,0.28,-45.61,46.16,18.78,15893,0.0488,0.921,2026-11-13 09:13:59,b161c09+uncommitted
+november,empirical,all,147,30101,0.0446,47,12,0.36,0.74,4.48,6,6,0.167,-39.48,-78.98,0.01,-41.66,-81.0,-2.31,15.36,31782,0.0428,0.865,2026-11-13 09:13:59,b161c09+uncommitted
+november,empirical,design,73,14540,0.057,36,8,0.18,0.94,4.6,5,5,0.0,-51.78,-83.1,-20.46,-54.01,-84.74,-23.28,11.28,16093,0.0526,0.959,2026-11-13 09:13:59,b161c09+uncommitted
+november,empirical,confirm,74,15561,0.033,11,4,0.99,0.66,4.04,1,1,1.0,22.0,,,20.1,,,,15689,0.0326,0.771,2026-11-13 09:13:59,b161c09+uncommitted

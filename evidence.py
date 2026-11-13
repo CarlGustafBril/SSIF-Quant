@@ -35,6 +35,7 @@ import pandas as pd
 from scipy import stats
 
 import backtest
+import bars
 import july
 import tape
 import variants
@@ -204,6 +205,10 @@ def _variant(args):
     name, signals, outcomes, windows, data = args
     spec = variants.VARIANTS[name]
     cfg = {**variants.DEFAULTS, **{k: v for k, v in spec.items() if k != "desc"}}
+    if cfg["bars"] == "measured":
+        cfg["spot_kinds"], cfg["quote_extra_s"] = variants.SPOT_KINDS[data]
+        if data == "november":                  # only our own recording has the feed to move forward
+            signals = bars.nowcast_table(signals)
     saved = dict(votes.AVG_WINDOW_S)
     votes.AVG_WINDOW_S.update(windows)
     try:
@@ -433,9 +438,21 @@ def report(name, with_variants):
     return gaps, tables
 
 
+def only_variants(data, names):
+    """Chosen variants on one dataset, without the rest of the report:  python evidence.py variants autumn baseline measured_bars"""
+    signals, outcomes, windows = dataset(data)
+    v = variant_table(signals, outcomes, windows, data, names)
+    print(v.to_string(index=False))
+    path = os.path.join(variants.RESULTS_DIR, f"variants_{data}_{'_'.join(n for n in names if n != 'baseline')}.csv")
+    v.assign(run_utc=fmt_ts(now_ms()), code_version=variants.git_version()).to_csv(path, index=False)
+    print(f"\nSaved to {path}")
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     name = args[0] if args else "summary"
+    if name == "variants":
+        return only_variants(args[1], args[2:])
     if name not in ("july", "holdout", "polls", "november", "now", "autumn", "summary"):
         sys.exit(__doc__)
     import io

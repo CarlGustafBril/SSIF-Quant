@@ -26,6 +26,8 @@ import pandas as pd
 from scipy import stats
 
 import backtest
+import bars
+import empirical
 import votes
 from recorder.reader import fmt_ts, load
 from recorder.store import now_ms
@@ -40,7 +42,18 @@ MOVE_HORIZON_S = 30
 FEED = {"5m": "chainlink", "15m": "chainlink", "1h": "binance"}     # the price each contract settles on
 
 DEFAULTS = {"z_limit": votes.Z_LIMIT, "staleness": "independent", "min_votes": 2, "bias": False,
-            "exit_after_s": None, "legs": None, "threshold": backtest.DEFAULT_THRESHOLD}
+            "exit_after_s": None, "legs": None, "threshold": backtest.DEFAULT_THRESHOLD,
+            "bars": "formula", "shape": "t", "spot_kinds": None, "quote_extra_s": 0.0}
+
+# What kind of reference price each dataset's tables hold for each contract (bars.py), and how much
+# older than the reference price its quotes are. Used only by variants with measured error bars.
+SPOT_KINDS = {
+    "november": ({"5m": "nowcast", "15m": "nowcast", "1h": "binance"}, 0.0),      # spot replaced by bars.nowcast_table
+    "july": ({"5m": "standin_spot", "15m": "standin_spot", "1h": "binance"}, 0.0),
+    "holdout": ({"5m": "standin_spot", "15m": "standin_spot", "1h": "binance"}, 0.0),
+    "now": ({"5m": "standin_twap", "15m": "standin_twap", "1h": "binance"}, 1.0),   # trade-built quotes: a second older
+    "autumn": ({"5m": "standin_twap", "15m": "standin_twap", "1h": "binance"}, 1.0),
+}
 
 VARIANTS = {
     "baseline": {
@@ -74,6 +87,16 @@ VARIANTS = {
         "threshold": 0.08,
         "desc": "Baseline signals, but traded only with at least 8 cents of edge instead of 4.5, to leave room "
                 "for the taker fee (up to 3.5 cents for the two legs). Proposed after the July test."},
+    "measured_bars": {
+        "bars": "measured",
+        "desc": "Error bars from measurement instead of the staleness formula (bars.py): the error of each kind of "
+                "reference price as measured on our recording and July, plus the measured change of the "
+                "Binance-Chainlink gap on the hourly contract. On our own recording the Chainlink price is also "
+                "moved forward by Binance's move since it was stamped. Proposed 2026-11-13."},
+    "empirical": {
+        "shape": "empirical",
+        "desc": "The return distribution is the empirical one (quantiles of the same 90 days of Binance returns "
+                "nu was fitted on, empirical.py) instead of a Student-t. Proposed 2026-11-13."},
     "exit_30s": {
         "exit_after_s": 30,
         "desc": "Baseline entries, but sold back at bid/ask 30 seconds after entry instead of held to expiry."},
@@ -87,12 +110,30 @@ def stale_dollars(spot, age_s, sd, sd_fast):
     return spot * sd_now * math.sqrt(age_s)
 
 
-def legs_for_row(r, names, staleness):
+def measured_dollars(kind, name, spot, sd, sd_fast, quote_extra_s):
+    """The measured error of this contract's reference price (bars.py), in dollars.
+
+    The hourly contract also carries the measured change of the Binance-Chainlink gap: its line and
+    settlement are Binance prices, the other contracts' are Chainlink prices. Quotes rebuilt from
+    trades are quote_extra_s older than the reference price, which adds that much movement.
+    """
+    sd_now = np.nanmax([sd, sd_fast]) if sd > 0 or sd_fast > 0 else np.nan
+    parts = [bars.spot_error(kind, spot, sd_now), spot * sd_now * math.sqrt(quote_extra_s)]
+    if name == "1h":
+        parts.append(bars.spot_error("gap", spot, sd_now))
+    return math.sqrt(sum(p * p for p in parts))
+
+
+def legs_for_row(r, names, staleness, cfg=DEFAULTS):
     legs = []
     for n in names:
         spot, age_s = r[f"spot_{n}"], max(r[f"feed_age_{n}"], 0) / 1000
         stale = 0.0
-        if staleness != "off":
+        if cfg["bars"] == "measured":
+            stale = measured_dollars(cfg["spot_kinds"][n], n, spot, r["sd"], r["sd_fast"], cfg["quote_extra_s"])
+            if not stale >= 0:
+                spot, stale = np.nan, 0.0
+        elif staleness != "off":
             stale = stale_dollars(spot, age_s, r["sd"], r["sd_fast"])
             if not stale >= 0:                      # no volatility figure: no vote, as in the frozen rules
                 spot, stale = np.nan, 0.0
@@ -166,7 +207,8 @@ def redecide(signals, cfg):
     rows = signals.index[(quoted >= 2) & (signals.tau > 0)]
     history_cols = [f"v_{n}" for n in ("5m", "15m", "1h") if f"v_{n}" in signals]
     starts = signals.groupby("expiry").ts.min()
-    results = {}
+    shapes = empirical.load_shapes() if cfg["shape"] == "empirical" else None
+    results, vote_rows = {}, {}
     for expiry, idx in signals.loc[rows].groupby("expiry").groups.items():
         offsets = {}
         if cfg["bias"]:
@@ -175,12 +217,22 @@ def redecide(signals, cfg):
         for i in idx:
             r = signals.loc[i]
             names = [n for n in names_all if not (pd.isna(r[f"bid_{n}"]) or pd.isna(r[f"ask_{n}"]))]
-            nu = r["nu"]
-            s = votes.signal(legs_for_row(r, names, cfg["staleness"]), r["sd"], nu, z_limit=cfg["z_limit"],
+            nu = votes.nu_for(r["tau"], shapes) if shapes else r["nu"]
+            s = votes.signal(legs_for_row(r, names, cfg["staleness"], cfg), r["sd"], nu, z_limit=cfg["z_limit"],
                              adjust=bias_adjust(offsets) if offsets else None,
                              pair_sigma=shared_pair_sigma(nu) if cfg["staleness"] == "shared" else None,
                              min_votes=cfg["min_votes"])
             results[i] = (s["kind"], s["outlier"], s["lo"], s["hi"], s["side"], s["edge"], s["model"], s["n_votes"])
+            vote_rows[i] = {f"{key}_{v['name']}": v[key] for v in s["votes"] for key in ("v", "sv")}
+    # the variant's own votes and error bars replace the frozen ones, so that the bars can be checked
+    for n in ("5m", "15m", "1h"):
+        for key in ("v", "sv"):
+            if f"{key}_{n}" in out:
+                out[f"{key}_{n}"] = np.nan
+    if vote_rows:
+        voted = pd.DataFrame.from_dict(vote_rows, orient="index")
+        for col in voted.columns:
+            out.loc[voted.index, col] = voted[col]
     if results:
         cols = ["kind", "outlier", "lo", "hi", "side", "edge", "model", "n_votes_variant"]
         decided = pd.DataFrame.from_dict(results, orient="index", columns=cols)
@@ -208,6 +260,21 @@ def exit_pnl(table, trades, after_s):
         else:
             pnl.append((qa[f"bid_{t.lo}"] - qa[f"ask_{t.hi}"]) - (qb[f"ask_{t.lo}"] - qb[f"bid_{t.hi}"]))
     return trades.assign(pnl=pnl)
+
+
+def bar_check(table):
+    """How much pairs of contracts disagree, in error bars (as backtest.error_bar_check): share beyond the limit, spread."""
+    every = []
+    for a, b in (("5m", "15m"), ("15m", "1h"), ("5m", "1h")):
+        cols = [f"v_{a}", f"sv_{a}", f"v_{b}", f"sv_{b}"]
+        if all(c in table for c in cols):
+            d = table.loc[table.tau > 60, cols].dropna().astype(float)
+            every.append((d[cols[0]] - d[cols[2]]) / np.hypot(d[cols[1]], d[cols[3]]))
+    z = pd.concat(every) if every else pd.Series(dtype=float)
+    if len(z) < 30:
+        return {"pair_seconds": len(z), "pairs_beyond_limit": np.nan, "pair_z_spread": np.nan}
+    return {"pair_seconds": len(z), "pairs_beyond_limit": round(float((z.abs() > votes.Z_LIMIT).mean()), 4),
+            "pair_z_spread": round(float(1.4826 * (z - z.median()).abs().median()), 3)}
 
 
 def evaluate(table, outcomes, cfg):
@@ -243,6 +310,8 @@ def evaluate(table, outcomes, cfg):
         "net_c_per_trade": round(net["pnl_cents"], 2) if net["trades"] else np.nan,
         "net_ci_low_c": round(net["ci_low"], 2) if net["trades"] > 1 else np.nan,
         "net_ci_high_c": round(net["ci_high"], 2) if net["trades"] > 1 else np.nan,
+        "pnl_se_c": round(float(trades.pnl.dropna().astype(float).std(ddof=1) / math.sqrt(s["trades"]) * 100), 2) if s["trades"] > 1 else np.nan,
+        **bar_check(table),
     }
 
 
@@ -315,7 +384,8 @@ def main():
     for name in chosen:
         spec = VARIANTS[name]
         cfg = {**DEFAULTS, **{k: v for k, v in spec.items() if k != "desc"}}
-        table = redecide(signals, cfg)
+        cfg["spot_kinds"], cfg["quote_extra_s"] = SPOT_KINDS["november"]
+        table = redecide(bars.nowcast_table(signals) if cfg["bars"] == "measured" else signals, cfg)
         if name == "baseline":                       # the re-decision must reproduce the frozen rules
             same = (table.kind.fillna("none") == signals.kind.fillna("none")) & \
                    (table.side.fillna("") == signals.side.fillna(""))
@@ -332,7 +402,10 @@ def main():
                   f"move {m['move30_c']} (se {m['move30_se_c']})  trades {m['trades']}  pnl {m['pnl_c_per_trade']}")
     run = pd.DataFrame(rows)
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    run.to_csv(RUNS_CSV, mode="a", header=not os.path.exists(RUNS_CSV), index=False)
+    if os.path.exists(RUNS_CSV):                 # columns have been added over time: keep one header for all runs
+        run = pd.concat([pd.read_csv(RUNS_CSV), run], ignore_index=True)
+    run.to_csv(RUNS_CSV, index=False)
+    run = run[run.run_utc == run_utc]
     write_summary(run, run_utc, version)
     print(f"\nAppended {len(run)} rows to {RUNS_CSV}\nWrote {SUMMARY_MD}")
 
