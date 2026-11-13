@@ -226,3 +226,34 @@ The public tape goes back to the change of settlement rule. Those eight weeks ha
 strategy under today's settlement rule. `same_feed` and `edge_8` were each proposed once, tested on
 data fixed beforehand, and rejected. No further variant has been tried on the today's-rule data, so
 that data has not been searched for a rule that happens to fit it.
+
+## Resting orders instead of taking (2026-11-13, from 00:30 UTC)
+
+The taker version loses about the fee. A resting (maker) order pays no taker fee and does not cross
+the spread, but it is filled only when someone trades against it, which tends to happen when the
+price is moving the wrong way. Whether what is saved exceeds what that costs can be measured on the
+public trades. `maker.py`.
+
+### Written down before any run
+
+- **Signals:** exactly the frozen rules' trades (first signal per expiry that has held 3 s with at
+  least 4.5 c of edge, still there one second later). Nothing about when to trade is changed.
+- **Execution:** one second after the signal, instead of crossing, rest one order per leg at the
+  best price on our side as seen then: to buy a contract, at its bid; to sell it, at its ask. Buying
+  the range = buy the lower strike, sell the higher. Orders rest for 30 seconds, then are cancelled.
+  Each filled leg is held to expiry on its own. One share per leg.
+- **Fill rule that counts ("strict"):** a buy at price b is filled only if, at least 2 s after it
+  was placed and within the 30 s, a taker sold at a price below b (the market traded through us).
+  Likewise a sell at a needs a taker buying above a. This assumes we are last in the queue.
+- **Shown for comparison ("at the price"):** filled if a taker traded at b or better. This assumes we
+  are first in the queue and is an upper bound, not a result.
+- **P&L:** payout minus price for a buy, price minus payout for a sell. No fee (makers pay none).
+  The maker rebate is not counted.
+- **Figure that counts:** P&L per signal in cents (sum over its filled legs, zero if none filled),
+  with a standard error over signals, on all of today's rule from the tape (2026-08-20 to 11-11,
+  796 signals). Trades are time-stamped 4 s late on the tape; they are moved back as in `tape.py`.
+- **Supported:** more than two standard errors above zero under the strict rule.
+- **Not viable:** the upper end of the 95% interval under the strict rule is below +1 c per signal.
+- **Otherwise:** undecided.
+- July (recorded book, exact trade times) is run the same way and reported, but does not decide.
+- One specification, run once. No other resting time, price or fill rule will be tried on this data.
