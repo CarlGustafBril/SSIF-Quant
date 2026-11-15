@@ -164,6 +164,7 @@ open in any browser: `qq_5m.svg`, `qq_15m.svg`, `qq_60m.svg` (tail fit) and `cal
 | `svgplot.py` | Small plot writer (SVG), so no plotting library is needed |
 | `tests/` | Unit tests, including the brief's worked example |
 | `FINDINGS.md` | What was verified, what differs from the brief, open questions |
+| `HANDOFF.md` | Context for a teammate: what was done and why, where it stands, what is open |
 
 ## Known limits
 
